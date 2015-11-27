@@ -8,18 +8,26 @@
 #include <dirent.h>
 #include "paths.h"
 #include "processes.h"
-#include "command.h"
+#include "files.h"
 
 #define MAX_LINE 80 /* 80 chars per line, per command, should be enough. */
 
-/* Path list */
+#define CREATE_MODE (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
+// Open the file to write, if it does not exists create, if it does append to it.
+#define CREATE_FLAGS_APPEND (O_WRONLY | O_CREAT | O_APPEND)
+#define CREATE_FLAGS_TRUNC (O_WRONLY | O_CREAT | O_APPEND)
+
 int setup(char inputBuffer[], char *args[], int *background);
+
+/* Setup the path and command lists */
 void setupPath();
+void setupCommands();
+int isSymbol(char *symbol);
 
 int isBackgroundProcess(char *args[], int i);
 void remove_ampersand(char *args[], int background, int length);
 
-void setupCommands();
+void parseCommands(char *args[], int i);
 
 int main(void)
 {
@@ -41,6 +49,8 @@ int main(void)
 
         /* setup() calls exit() when Control-D is entered */
         number_of_args = setup(inputBuffer, args, &background);
+        parseCommands(args, number_of_args);
+
 
         /* set if the process will run in background */
         background = isBackgroundProcess(args, number_of_args);
@@ -94,7 +104,28 @@ int main(void)
     }
 }
 
-/**/
+void parseCommands(char *args[], int number_of_args) {
+
+    int i;
+    for (i = 0; i < number_of_args; i++) {
+        char command[64];
+
+        if (isSymbol(args[i]))
+
+
+    }
+
+    /* split the path names by colon (:) */
+    char *token = strtok(inputBuffer, "> >> < >& |");
+    insertIntoPath(&headPaths, &tailPaths, token);
+
+    while (token != NULL) {
+        token = strtok(NULL, ":");
+        insertIntoPath(&headPaths, &tailPaths, token);
+    }
+}
+
+/* setup the locations in the PATH variable */
 void setupPath() {
     // Get the PATH environment variable.
     char *paths = getenv("PATH");
@@ -109,7 +140,7 @@ void setupPath() {
     }
 }
 
-/* read the path to store all commands in the system */
+/* read the path to store all the system's commands in linked list */
 void setupCommands() {
     while (headPaths->path != NULL) {
 
@@ -120,14 +151,13 @@ void setupCommands() {
         DIR *dir;
         struct dirent *ent;
         if ((dir = opendir (currentPath)) != NULL) {
-            /* print all the files within directory */
             while ((ent = readdir (dir)) != NULL) {
                 if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
 
                 char path[512];
                 strcpy(path, currentPath);
                 strcat(path, ent->d_name);
-                insertCommand(&commands, ent->d_name, path);
+                insertFiles(&commands, ent->d_name, path);
             }
             closedir (dir);
         }
@@ -136,7 +166,6 @@ void setupCommands() {
         headPaths = headPaths->nextPath;
     }
 }
-
 
 /* return the index of ampersand symbol */
 int isBackgroundProcess(char *args[], int number_of_arguments) {
@@ -159,15 +188,29 @@ void remove_ampersand(char *args[], int background, int length) {
 
 }
 
+int isSymbol(char *symbol) {
+    char *symbols[] = {">", ">>", "<", ">&", "|"};
+    int length = sizeof (symbols) / sizeof (*symbols);
+
+    int i;
+    for (i = 0; i < length; i++) {
+        if (strcmp(symbols[i], symbol) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 /* read the next command line; separate it into distinct arguments. */
 int setup(char inputBuffer[], char *args[], int *background)
 {
     int length; /* # of characters in the command line */
     int i;      /* loop index for accessing inputBuffer array */
     int start;  /* index where beginning of next command parameter is */
-    int ct;     /* index of where to place the next parameter into args[] */
+    int count;     /* index of where to place the next parameter into args[] */
 
-    ct = 0;
+    count = 0;
 
     /* read what the user enters on the command line */
     length = (int) read(STDIN_FILENO, inputBuffer, MAX_LINE);
@@ -197,8 +240,8 @@ int setup(char inputBuffer[], char *args[], int *background)
             case ' ':
             case '\t' :               /* argument separators */
                 if(start != -1){
-                    args[ct] = &inputBuffer[start];    /* set up pointer */
-                    ct++;
+                    args[count] = &inputBuffer[start];    /* set up pointer */
+                    count++;
                 }
                 inputBuffer[i] = '\0'; /* add a null char; make a C string */
                 start = -1;
@@ -206,11 +249,11 @@ int setup(char inputBuffer[], char *args[], int *background)
 
             case '\n':                 /* should be the final char examined */
                 if (start != -1){
-                    args[ct] = &inputBuffer[start];
-                    ct++;
+                    args[count] = &inputBuffer[start];
+                    count++;
                 }
                 inputBuffer[i] = '\0';
-                args[ct] = NULL; /* no more arguments to this command */
+                args[count] = NULL; /* no more arguments to this command */
                 break;
 
             default :             /* some other character */
@@ -222,10 +265,10 @@ int setup(char inputBuffer[], char *args[], int *background)
                 }
         } /* end of switch */
     }    /* end of for */
-    args[ct] = NULL; /* just in case the input line was > 80 */
+    args[count] = NULL; /* just in case the input line was > 80 */
 
-    for (i = 0; i <= ct; i++)
+    for (i = 0; i <= count; i++)
         printf("args %d = %s\n", i, args[i]);
 
-    return ct;
+    return count;
 }

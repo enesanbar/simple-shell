@@ -1,82 +1,54 @@
+/* Struct to construct a list of paths. */
 struct command_node {
-    char name[256];			    /* User printable name of the function. */
-    char path[512];             /* The path of the system command */
+    char *args;
+    char *next_symbol;
     struct command_node *nextCommand;
 };
 
-typedef struct command_node CommandNode; /* synonym for struct process_node */
+typedef struct command_node CommandNode; /* synonym for struct command_node */
 typedef CommandNode *CommandNodePtr; /* synonym for CommandNode* */
 
-CommandNodePtr commands = NULL; /* initialize commands */
+CommandNodePtr headPaths = NULL; /* initialize headPtr */
+CommandNodePtr tailPaths = NULL; /* initialize tailPtr */
 
-void insertCommand (CommandNodePtr *sPtr, char name[], char path[]) {
-    CommandNodePtr newPtr;
-    CommandNodePtr previousPtr;
-    CommandNodePtr currentPtr;
+int isEmpty(CommandNodePtr headPtr) {
+    return headPtr == NULL;
+}
 
-    newPtr = malloc(sizeof(CommandNode));
+void insertIntoCommands( CommandNodePtr *headPtr, CommandNodePtr *tailPtr, char *args[], char *symbol ) {
+    CommandNodePtr newPtr; /* pointer to a new path */
+    newPtr = malloc( sizeof(CommandNode) );
 
     if (newPtr != NULL) {
-        strcpy(newPtr->name, name);
-        strcpy(newPtr->path, path);
+        newPtr->args = args;
         newPtr->nextCommand = NULL;
 
-        previousPtr = NULL;
-        currentPtr = *sPtr;
+        if (symbol != NULL)
+            newPtr->next_symbol = symbol;
 
-        /* loop to find the correct location to insert the command alphabetically */
-        while (currentPtr != NULL && (strcmp(name, currentPtr->name)) > 0) {
-            previousPtr = currentPtr;
-            currentPtr = currentPtr->nextCommand;
+        /* if empty, insert node at head */
+        if (isEmpty(*headPtr)) {
+            *headPtr = newPtr;
+        } else {
+            (*tailPtr)->nextCommand = newPtr;
         }
 
-        /* insert the command at the beginning if it's initially empty */
-        if (previousPtr == NULL) {
-            newPtr->nextCommand = *sPtr;
-            *sPtr = newPtr;
-        }
-        /* insert the new node between previousPtr and currentPtr */
-        else {
-            previousPtr->nextCommand = newPtr;
-            newPtr->nextCommand = currentPtr;
-        }
+        *tailPtr = newPtr;
+    } else {
+        printf( "%s not inserted. No memory available.\n", args );
     }
 
-    else {
-        printf("The command %s not inserted. No memory available!\n", name);
-    }
 }
 
-CommandNodePtr findCommand(CommandNodePtr currentCommand, char *name) {
-    /* if list is empty */
-    if (currentCommand == NULL) {
-        printf("Command list is empty");
+void printCommands(CommandNodePtr currentPath) {
+    /* if queue is empty */
+    if (currentPath == NULL) {
+        printf("Path list is empty");
     }
 
     else {
-        while ( currentCommand != NULL ) {
-            if (strcmp(currentCommand->name, name) == 0)
-                return currentCommand;
-
-            currentCommand = currentCommand->nextCommand;
-        }
-
-    }
-
-    return NULL;
-}
-
-void printCommands(CommandNodePtr currentCommand) {
-    /* if list is empty */
-    if (currentCommand == NULL) {
-        printf("Command list is empty");
-    }
-
-    else {
-        while ( currentCommand != NULL ) {
-            printf("%s", currentCommand->path);
-            printf("\n");
-            currentCommand = currentCommand->nextCommand;
+        while ( currentPath != NULL ) {
+;
         }
 
     }

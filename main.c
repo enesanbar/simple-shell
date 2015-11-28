@@ -9,6 +9,7 @@
 #include "paths.h"
 #include "processes.h"
 #include "files.h"
+#include "command.h"
 
 #define MAX_LINE 80 /* 80 chars per line, per command, should be enough. */
 
@@ -21,11 +22,10 @@ int setup(char inputBuffer[], char *args[], int *background);
 
 /* Setup the path and command lists */
 void setupPath();
-void setupCommands();
-int isSymbol(char *symbol);
+void setupSystemFiles();
 
-int isBackgroundProcess(char *args[], int i);
-void remove_ampersand(char *args[], int background, int length);
+/* determine if a given argument is either redirection or pipe symbol */
+int isSymbol(char *symbol);
 
 void parseCommands(char *args[], int i);
 
@@ -41,7 +41,8 @@ int main(void)
     setupPath();
 
     /* setup all commands available */
-    setupCommands();
+    setupSystemFiles();
+    printSystemFiles(files);
 
     while (1){
         printf("$ ");
@@ -49,79 +50,104 @@ int main(void)
 
         /* setup() calls exit() when Control-D is entered */
         number_of_args = setup(inputBuffer, args, &background);
+
+        /* empty the command list */
+        emptyCommands(&headCommand, &tailCommand);
+
+        /* split the commands by the pipe and redirection symbols */
+        /* and store them in the queue */
         parseCommands(args, number_of_args);
 
 
-        /* set if the process will run in background */
-        background = isBackgroundProcess(args, number_of_args);
 
-        if (background) {
-            remove_ampersand(args, background, number_of_args);
-        }
+        FileNodePtr file = findFile(files, args[0]);
 
-        CommandNodePtr command = findCommand(commands, args[0]);
-
-        if (command == NULL) {
+        if (file == NULL) {
             printf("%s: command not found!\n", args[0]);
-        } else {
-            /** fork a child process using fork() */
-            child_pid = fork();
-
-            if (child_pid == -1) {
-                perror("Failed to fork");
-                return EXIT_FAILURE;
-            }
-
-            /* child process will invoke execv() */
-            if (child_pid == 0) {
-                printf("Hey! I'm the child process: %ld\n", (long)getpid());
-
-                /* if the process is a background process, store it. */
-                if (background) insertIntoProcesses(&headProcesses, &tailProcesses, getpid(), args[0]);
-
-                /* execute the given command */
-                execv(command->path, &args[0]);
-
-                perror("Command not found!");
-            }
-
-            if (child_pid > 0) {
-                if (background) {
-                    printf("Hey! I'm the parent (%ld) waiting for my child to finish!\n", (long) getpid());
-
-                    __pid_t pid = wait(NULL);
-                    fprintf(stderr, "The PID that wait(NULL) returns: %ld\n", (long)pid);
-
-                    printf("Hey! I'm the parent (%ld). My child (%ld) just finished executing!\n", (long)getpid(), (long)pid);
-                } else {
-                    printf("Hey! I'm parent. I'm not waiting for my child.\n");
-                }
-            }
+            continue;
         }
 
+        /** fork a child process using fork() */
+        child_pid = fork();
+
+        if (child_pid == -1) {
+            perror("Failed to fork");
+            return EXIT_FAILURE;
+        }
+
+        /* child process will invoke execv() */
+        if (child_pid == 0) {
+            printf("Hey! I'm the child process: %ld\n", (long)getpid());
+
+            /* if the process is a background process, store it. */
+            if (background) insertIntoProcesses(&headProcesses, &tailProcesses, getpid(), args[0]);
+
+            /* execute the given command */
+            execv(file->path, &args[0]);
+
+            perror("Command not found!");
+        }
+
+        if (child_pid > 0) {
+            if (background) {
+                printf("Hey! I'm the parent (%ld) waiting for my child to finish!\n", (long) getpid());
+
+                __pid_t pid = wait(NULL);
+                fprintf(stderr, "The PID that wait(NULL) returns: %ld\n", (long)pid);
+
+                printf("Hey! I'm the parent (%ld). My child (%ld) just finished executing!\n", (long)getpid(), (long)pid);
+            } else {
+                printf("Hey! I'm parent. I'm not waiting for my child.\n");
+            }
+        }
 
 
     }
 }
 
-void parseCommands(char *args[], int number_of_args) {
-
+/* determine if a given argument is either redirection or pipe symbol */
+int isSymbol(char *symbol) {
+    char *symbols[] = {">", ">>", "<", ">&", "|"};
+    int length = sizeof (symbols) / sizeof (*symbols);
     int i;
-    for (i = 0; i < number_of_args; i++) {
-        char command[64];
-
-        if (isSymbol(args[i]))
-
-
+    for (i = 0; i < length; i++) {
+        if (strcmp(symbols[i], symbol) == 0) {
+            return true;
+        }
     }
 
-    /* split the path names by colon (:) */
-    char *token = strtok(inputBuffer, "> >> < >& |");
-    insertIntoPath(&headPaths, &tailPaths, token);
+    return false;
+}
 
-    while (token != NULL) {
-        token = strtok(NULL, ":");
-        insertIntoPath(&headPaths, &tailPaths, token);
+/* split all command by the pipe and redirection symbols */
+void parseCommands(char *args[], int number_of_args) {
+    int count;
+    int i;
+
+    count = 0;
+    char *temp[MAX_LINE/2 + 1];
+
+    /* loop through the argument array */
+    for (i = 0; i < number_of_args; i++) {
+        /* split commands by the redirection or pipe symbol */
+        /* ignore the remaining commands after ampersand */
+        if (!isSymbol(args[i]) && strcmp(args[i], "&") != 0) {
+            temp[count] = malloc(sizeof(args[i]));
+            strcpy(temp[count], args[i]);
+            count++;
+
+            /* if it is the last argument, assign NULL to the symbol in the data structure */
+            if (i + 1 == number_of_args) {
+                insertIntoCommands(&headCommand, &tailCommand, temp, NULL, count);
+                count = 0;  // reset the counter
+            }
+
+        }
+        else {
+            insertIntoCommands(&headCommand, &tailCommand, temp, args[i], count);
+            memset(temp, 0, sizeof temp);
+            count = 0;  // reset the counter
+        }
     }
 }
 
@@ -132,8 +158,11 @@ void setupPath() {
 
     /* split the path names by colon (:) */
     char *token = strtok(paths, ":");
+
+    /* insert the first path to the queue */
     insertIntoPath(&headPaths, &tailPaths, token);
 
+    /* keep inserting the remaining paths. */
     while (token != NULL) {
         token = strtok(NULL, ":");
         insertIntoPath(&headPaths, &tailPaths, token);
@@ -141,65 +170,48 @@ void setupPath() {
 }
 
 /* read the path to store all the system's commands in linked list */
-void setupCommands() {
+void setupSystemFiles() {
     while (headPaths->path != NULL) {
 
-        char currentPath[128];
-        strcpy(currentPath, headPaths->path);
-        strcat(currentPath, "/");
+        /* allocate enough memory for the current path name */
+        char *currentPath = malloc(sizeof headPaths->path + 1);
 
+        /* copy current path to the currentPath variable */
+        strcpy(currentPath, headPaths->path);   // /usr/bin
+
+        /* append slash character to the path */
+        strcat(currentPath, "/");   // /usr/bin/
+
+        // open the current directory and start reading files
         DIR *dir;
         struct dirent *ent;
         if ((dir = opendir (currentPath)) != NULL) {
             while ((ent = readdir (dir)) != NULL) {
+                // ignore the current and previous directories
                 if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
 
-                char path[512];
-                strcpy(path, currentPath);
-                strcat(path, ent->d_name);
-                insertFiles(&commands, ent->d_name, path);
+                /* allocate enough memory for the length of the file path */
+                char *file_path = malloc(sizeof currentPath + sizeof ent->d_name);
+
+                /* copy the currentPath to the file_path pointer and append file name to it*/
+                strcpy(file_path, currentPath);     // /bin/
+                strcat(file_path, ent->d_name);     // /bin/ls
+
+                /* insert the command to the linked list */
+                insertFiles(&files, ent->d_name, file_path);
+
+                /* free the memory location that file_path pointer points to */
+                memset(file_path, 0, sizeof file_path);
             }
             closedir (dir);
         }
 
         /* advance to the next path in the path list */
         headPaths = headPaths->nextPath;
+
+        /* free the memory location that currentPath pointer points to */
+        memset(currentPath, 0, sizeof currentPath);
     }
-}
-
-/* return the index of ampersand symbol */
-int isBackgroundProcess(char *args[], int number_of_arguments) {
-    int i;
-    for (i = 0; i < number_of_arguments; i++) {
-        if (strcmp(args[i], "&") == 0) {
-            return i;
-        }
-    }
-
-    return 0;
-}
-
-/* remove the ampersand symbol from the arguments array */
-void remove_ampersand(char *args[], int background, int length) {
-    int i = background;
-    for ( ; i < length; i++) {
-        args[i] = NULL;
-    }
-
-}
-
-int isSymbol(char *symbol) {
-    char *symbols[] = {">", ">>", "<", ">&", "|"};
-    int length = sizeof (symbols) / sizeof (*symbols);
-
-    int i;
-    for (i = 0; i < length; i++) {
-        if (strcmp(symbols[i], symbol) == 0) {
-            return true;
-        }
-    }
-
-    return false;
 }
 
 /* read the next command line; separate it into distinct arguments. */

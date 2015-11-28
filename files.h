@@ -1,20 +1,20 @@
-struct command_node {
+struct file_node {
     char name[256];			    /* User printable name of the function. */
     char path[512];             /* The path of the system command */
-    struct command_node *nextCommand;
+    struct file_node *nextCommand;
 };
 
-typedef struct command_node CommandNode; /* synonym for struct process_node */
-typedef CommandNode *CommandNodePtr; /* synonym for CommandNode* */
+typedef struct file_node FileNode; /* synonym for struct process_node */
+typedef FileNode *FileNodePtr; /* synonym for FileNode* */
 
-CommandNodePtr commands = NULL; /* initialize commands */
+FileNodePtr files = NULL; /* initialize files */
 
-void insertFiles (CommandNodePtr *sPtr, char name[], char path[]) {
-    CommandNodePtr newPtr;
-    CommandNodePtr previousPtr;
-    CommandNodePtr currentPtr;
+void insertFiles (FileNodePtr *sPtr, char name[], char path[]) {
+    FileNodePtr newPtr;
+    FileNodePtr previousPtr;
+    FileNodePtr currentPtr;
 
-    newPtr = malloc(sizeof(CommandNode));
+    newPtr = malloc(sizeof(FileNode));
 
     if (newPtr != NULL) {
         strcpy(newPtr->name, name);
@@ -47,18 +47,18 @@ void insertFiles (CommandNodePtr *sPtr, char name[], char path[]) {
     }
 }
 
-CommandNodePtr findCommand(CommandNodePtr currentCommand, char *name) {
+FileNodePtr findFile(FileNodePtr currentFile, char *name) {
     /* if list is empty */
-    if (currentCommand == NULL) {
+    if (currentFile == NULL) {
         printf("Command list is empty");
     }
 
     else {
-        while ( currentCommand != NULL ) {
-            if (strcmp(currentCommand->name, name) == 0)
-                return currentCommand;
+        while ( currentFile != NULL ) {
+            if (strcmp(currentFile->name, name) == 0)
+                return currentFile;
 
-            currentCommand = currentCommand->nextCommand;
+            currentFile = currentFile->nextCommand;
         }
 
     }
@@ -66,17 +66,17 @@ CommandNodePtr findCommand(CommandNodePtr currentCommand, char *name) {
     return NULL;
 }
 
-void printCommands(CommandNodePtr currentCommand) {
+void printSystemFiles(FileNodePtr currentFile) {
     /* if list is empty */
-    if (currentCommand == NULL) {
+    if (currentFile == NULL) {
         printf("Command list is empty");
     }
 
     else {
-        while ( currentCommand != NULL ) {
-            printf("%s", currentCommand->path);
+        while ( currentFile != NULL ) {
+            printf("%s", currentFile->path);
             printf("\n");
-            currentCommand = currentCommand->nextCommand;
+            currentFile = currentFile->nextCommand;
         }
 
     }

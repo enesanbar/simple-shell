@@ -3,10 +3,10 @@
 /* Struct to construct a list of paths. */
 struct command_node {
     int index;
+    char **args;
+    int count;
     char *next_symbol;
     struct command_node *nextCommand;
-    int count;
-    char *args[];
 };
 
 typedef struct command_node CommandNode; /* synonym for struct command_node */
@@ -19,26 +19,25 @@ int isCommandEmpty(CommandNodePtr headPtr) {
     return headPtr == NULL;
 }
 
-void insertIntoCommands( CommandNodePtr *headPtr, CommandNodePtr *tailPtr, char *args[], char *symbol, int count ) {
-    CommandNodePtr newPtr; /* pointer to a new command */
+void insertIntoCommands( CommandNodePtr *headPtr, CommandNodePtr *tailPtr, char **args, char *symbol, int count ) {
+    int i;
+    CommandNodePtr newPtr = NULL; /* pointer to a new command */
+
     newPtr = malloc( sizeof(CommandNode) );
 
     if (newPtr != NULL) {
-        int i;
+        newPtr->count = count;
+
+        /* allocate memory for each argument */
+        newPtr->args = malloc(sizeof(char*) * (count + 1));
         for (i = 0; i < count; i++) {
-            newPtr->args[i] = malloc(sizeof(args[i]));
-            newPtr->args[i] = args[i];
+            newPtr->args[i] = malloc(strlen(args[i]) + 1);
+            strcpy(newPtr->args[i], args[i]);
         }
 
         /* The array of pointers must be terminated by a NULL pointer. */
-        newPtr->args[i] = malloc(sizeof(args[i]));
         newPtr->args[i] = NULL;
-
-        newPtr->count = count;
-        newPtr->nextCommand = NULL;
-
-        if (symbol != NULL)
-            newPtr->next_symbol = symbol;
+        newPtr->next_symbol = symbol;
 
         /* if empty, insert node at head */
         if (isCommandEmpty(*headPtr)) {
@@ -49,6 +48,7 @@ void insertIntoCommands( CommandNodePtr *headPtr, CommandNodePtr *tailPtr, char 
             (*tailPtr)->nextCommand = newPtr;
         }
 
+        newPtr->nextCommand = NULL;
         *tailPtr = newPtr;
     } else {
         printf( "command not inserted. No memory available.\n");
@@ -69,10 +69,11 @@ void emptyCommands(CommandNodePtr *headPtr, CommandNodePtr *tailPtr) {
         }
 
         int i;
-        for (i = 0; i < temp->count; ++i) {
+        for (i = 0; i <= temp->count; ++i) {
             free(temp->args[i]);
         }
 
+        free(temp->args);
         free(temp);
 
     }
@@ -91,7 +92,7 @@ void printCommands(CommandNodePtr currentCommand) {
                 fprintf(stderr, "args %d = %s\n", i, currentCommand->args[i]);
 
             if (currentCommand->nextCommand == NULL)
-                fprintf(stderr, "next_symbol: NULL\n");
+                fprintf(stderr, "currentCommand->next_symbol: NULL\n");
             else
                 fprintf(stderr, "currentCommand->next_symbol: %s\n\n", currentCommand->next_symbol);
 

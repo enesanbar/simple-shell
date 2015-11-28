@@ -211,8 +211,10 @@ int executePipes() {
 int getNumberOfPipes(CommandNodePtr headCommand) {
     int count = 0;
 
+    /* loop through the command list*/
     while (headCommand != NULL) {
-        if (strcmp(headCommand->next_symbol, PIPE) == 0)
+        /* if it is not the last argument and the symbol is a pipe, increment the counter */
+        if (headCommand->next_symbol != NULL && strcmp(headCommand->next_symbol, "|") == 0)
             count++;
 
         headCommand = headCommand->nextCommand;
@@ -248,33 +250,39 @@ int isSymbol(char *symbol) {
 /* split all command by the pipe and redirection symbols */
 void parseCommands(char *args[], int number_of_args) {
     int count;
-    int i;
+    int i, j;
 
     count = 0;
-    char *temp[MAX_LINE/2 + 1];
+    char **temp = NULL;
+    temp = malloc(sizeof(char*) * number_of_args);
 
     /* loop through the argument array */
     for (i = 0; i < number_of_args; i++) {
-        /* split commands by the redirection or pipe symbol */
         /* ignore the remaining commands after ampersand */
-        if (!isSymbol(args[i]) && strcmp(args[i], "&") != 0) {
-            temp[count] = malloc(sizeof(args[i]));
+        if (strcmp(args[i], "&") == 0) return;
+
+        /* split commands by the redirection or pipe symbol */
+        if (!isSymbol(args[i])) {
+            temp[count] = malloc(strlen(args[i]) + 1);
             strcpy(temp[count], args[i]);
             count++;
 
             /* if it is the last argument, assign NULL to the symbol in the data structure */
             if (i + 1 == number_of_args) {
                 insertIntoCommands(&headCommand, &tailCommand, temp, NULL, count);
+                for (j = 0; j < count; j++) free(temp[j]);
                 count = 0;  // reset the counter
             }
 
         }
         else {
             insertIntoCommands(&headCommand, &tailCommand, temp, args[i], count);
-            memset(temp, 0, sizeof temp);
+            for (j = 0; j < count; j++) free(temp[j]);
             count = 0;  // reset the counter
         }
     }
+
+    free(temp);
 }
 
 /* setup the locations in the PATH variable */

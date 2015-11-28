@@ -29,6 +29,12 @@ int isSymbol(char *symbol);
 
 void parseCommands(char *args[], int i);
 
+void initializeFiles();
+
+int executePipes();
+
+int getNumberOfPipes(CommandNodePtr headCommand);
+
 int main(void)
 {
     char inputBuffer[MAX_LINE]; /* buffer to hold command entered */
@@ -37,12 +43,8 @@ int main(void)
     pid_t child_pid;
     int number_of_args;
 
-    /* store the value of PATH environment variable in queue */
-    setupPath();
-
-    /* setup all commands available */
-    setupSystemFiles();
-    printSystemFiles(files);
+    /* store the files in the path in the linked-list */
+    initializeFiles();
 
     while (1){
         printf("$ ");
@@ -51,65 +53,189 @@ int main(void)
         /* setup() calls exit() when Control-D is entered */
         number_of_args = setup(inputBuffer, args, &background);
 
-        /* empty the command list */
-        emptyCommands(&headCommand, &tailCommand);
-
         /* split the commands by the pipe and redirection symbols */
         /* and store them in the queue */
         parseCommands(args, number_of_args);
 
+        executePipes();
 
 
-        FileNodePtr file = findFile(files, args[0]);
 
-        if (file == NULL) {
-            printf("%s: command not found!\n", args[0]);
-            continue;
-        }
+//        FileNodePtr file = findFile(files, args[0]);
 
-        /** fork a child process using fork() */
-        child_pid = fork();
-
-        if (child_pid == -1) {
-            perror("Failed to fork");
-            return EXIT_FAILURE;
-        }
-
-        /* child process will invoke execv() */
-        if (child_pid == 0) {
-            printf("Hey! I'm the child process: %ld\n", (long)getpid());
-
-            /* if the process is a background process, store it. */
-            if (background) insertIntoProcesses(&headProcesses, &tailProcesses, getpid(), args[0]);
-
-            /* execute the given command */
-            execv(file->path, &args[0]);
-
-            perror("Command not found!");
-        }
-
-        if (child_pid > 0) {
-            if (background) {
-                printf("Hey! I'm the parent (%ld) waiting for my child to finish!\n", (long) getpid());
-
-                __pid_t pid = wait(NULL);
-                fprintf(stderr, "The PID that wait(NULL) returns: %ld\n", (long)pid);
-
-                printf("Hey! I'm the parent (%ld). My child (%ld) just finished executing!\n", (long)getpid(), (long)pid);
-            } else {
-                printf("Hey! I'm parent. I'm not waiting for my child.\n");
-            }
-        }
+//        /** fork a child process using fork() */
+//        child_pid = fork();
+//
+//        if (child_pid == -1) {
+//            perror("Failed to fork");
+//            return EXIT_FAILURE;
+//        }
+//
+//        /* child process will invoke execv() */
+//        if (child_pid == 0) {
+//            printf("Hey! I'm the child process: %ld\n", (long)getpid());
+//
+//            /* if the process is running in the background, store it. */
+//            if (background) insertIntoProcesses(&headProcesses, &tailProcesses, getpid(), args[0]);
+//
+//            /* execute the given command */
+//            execv(file->path, &args[0]);
+//
+//
+//            perror("Command not found!");
+//        }
+//
+//        if (child_pid > 0) {
+//            if (background) {
+//                printf("Hey! I'm the parent (%ld) waiting for my child to finish!\n", (long) getpid());
+//
+//                __pid_t pid = wait(NULL);
+//                fprintf(stderr, "The PID that wait(NULL) returns: %ld\n", (long)pid);
+//
+//                printf("Hey! I'm the parent (%ld). My child (%ld) just finished executing!\n", (long)getpid(), (long)pid);
+//            } else {
+//                printf("Hey! I'm parent. I'm not waiting for my child.\n");
+//            }
+//        }
 
 
     }
 }
 
+int executePipes() {
+    int i, j;
+    int status;
+
+    pid_t child_pid;
+    int number_of_pipes = getNumberOfPipes(headCommand);
+    int writeCounter = 1;
+    int readCounter = 0;
+
+    /* setup the pipes */
+    int pipes[2 * number_of_pipes];
+    for (i = 0; i < number_of_pipes; i++) {
+        if (pipe(pipes + i*2) == -1) {
+            perror("Failed to create the pipe");
+            return EXIT_FAILURE;
+        }
+    }
+
+    /* having executed this command: ls | sort | wc */
+    /* we'll have 4 fds */
+    // pipes[0] = read end of ls->sort pipe (read by sort)
+    // pipes[1] = write end of ls->sort pipe (written by ls)
+    // pipes[2] = read end of sort->wc pipe (read by wc)
+    // pipes[3] = write end of sort->wc pipe (written by sort)
+
+    CommandNodePtr command;
+    for (j = 0; j <= number_of_pipes; j++) {
+
+        if ((child_pid = fork()) == -1) {
+            perror("Failed to fork!");
+            return EXIT_FAILURE;
+        }
+
+        if (child_pid == 0) {
+            command = headCommand;
+
+            // command1 | command2 | command3 | command4 | command5 | command 6
+            //        1   0      3   2      5   4      7   6      9    8
+            if (j == 0) {
+                // replace current stdout with write part of 0th pipe
+                if ( (dup2(pipes[writeCounter], STDOUT_FILENO)) < 0 )
+                    perror("dup2 error!\n");
+            } else if (j == number_of_pipes) {
+                // replace current stdin with input read of last pipe
+                if ( (dup2(pipes[readCounter], STDIN_FILENO)) < 0 )
+                    perror("dup2 error\n");
+            } else {
+                // replace current stdin with input read of middle pipe
+                if ( (dup2(pipes[readCounter], STDIN_FILENO)) < 0)
+                    perror("dup2 error!\n");
+
+                // replace current stdout with write end of middle pipe
+                if ( (dup2(pipes[writeCounter], STDOUT_FILENO)) < 0 )
+                    perror("dup2 error\n");
+            }
+
+            /* close all pipes */
+            for (i = 0; i < (2 * number_of_pipes); i++) {
+                close(pipes[i]);
+            }
+
+            FileNodePtr file = findFile(files, command->args[0]);
+
+            /* check if the given command exists */
+            if (file == NULL) {
+                printf("%s: command not found!\n", command->args[0]);
+                headCommand = headCommand->nextCommand;
+                continue;
+            }
+
+            int k;
+            char *args[command->count + 1];
+            for (k = 0; k <= command->count; k++) {
+                args[k] = command->args[k];
+            }
+
+            /* execute the command */
+            execv(file->path, &args[0]);
+            fprintf(stderr, "Failed to execute the command %s\n", file->name);
+
+            return EXIT_FAILURE;
+        } else {
+            /* update the counters in the parent code. */
+            if (j == 0)
+                writeCounter += 2;
+            else if (j == number_of_pipes);
+            else {
+                readCounter += 2;
+                writeCounter =+ 2;
+            }
+
+            headCommand = headCommand->nextCommand;
+        }
+
+    }
+
+    /* close all pipes */
+    for (i = 0; i < (2 * number_of_pipes); i++)
+        close(pipes[i]);
+
+    for (i = 0; i < 3; i++)
+        wait(&status);
+
+    return EXIT_SUCCESS;
+}
+
+int getNumberOfPipes(CommandNodePtr headCommand) {
+    int count = 0;
+
+    while (headCommand != NULL) {
+        if (strcmp(headCommand->next_symbol, PIPE) == 0)
+            count++;
+
+        headCommand = headCommand->nextCommand;
+    }
+
+    return count;
+}
+
+void initializeFiles() {
+    /* store the value of PATH environment variable in queue */
+    setupPath();
+
+    /* setup all commands available */
+    setupSystemFiles();
+}
+
 /* determine if a given argument is either redirection or pipe symbol */
 int isSymbol(char *symbol) {
+    /* symbols available */
     char *symbols[] = {">", ">>", "<", ">&", "|"};
     int length = sizeof (symbols) / sizeof (*symbols);
     int i;
+
     for (i = 0; i < length; i++) {
         if (strcmp(symbols[i], symbol) == 0) {
             return true;
@@ -176,7 +302,7 @@ void setupSystemFiles() {
         /* allocate enough memory for the current path name */
         char *currentPath = malloc(sizeof headPaths->path + 1);
 
-        /* copy current path to the currentPath variable */
+        /* copy current path in the queue to the currentPath variable */
         strcpy(currentPath, headPaths->path);   // /usr/bin
 
         /* append slash character to the path */
@@ -278,6 +404,9 @@ int setup(char inputBuffer[], char *args[], int *background)
         } /* end of switch */
     }    /* end of for */
     args[count] = NULL; /* just in case the input line was > 80 */
+
+    /* empty the command list for the next use */
+    emptyCommands(&headCommand, &tailCommand);
 
     for (i = 0; i <= count; i++)
         printf("args %d = %s\n", i, args[i]);

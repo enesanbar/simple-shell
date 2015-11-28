@@ -1,5 +1,8 @@
+#define PIPE "|"
+
 /* Struct to construct a list of paths. */
 struct command_node {
+    int index;
     char *next_symbol;
     struct command_node *nextCommand;
     int count;
@@ -17,7 +20,7 @@ int isCommandEmpty(CommandNodePtr headPtr) {
 }
 
 void insertIntoCommands( CommandNodePtr *headPtr, CommandNodePtr *tailPtr, char *args[], char *symbol, int count ) {
-    CommandNodePtr newPtr; /* pointer to a new path */
+    CommandNodePtr newPtr; /* pointer to a new command */
     newPtr = malloc( sizeof(CommandNode) );
 
     if (newPtr != NULL) {
@@ -27,6 +30,10 @@ void insertIntoCommands( CommandNodePtr *headPtr, CommandNodePtr *tailPtr, char 
             newPtr->args[i] = args[i];
         }
 
+        /* The array of pointers must be terminated by a NULL pointer. */
+        newPtr->args[i] = malloc(sizeof(args[i]));
+        newPtr->args[i] = NULL;
+
         newPtr->count = count;
         newPtr->nextCommand = NULL;
 
@@ -35,8 +42,10 @@ void insertIntoCommands( CommandNodePtr *headPtr, CommandNodePtr *tailPtr, char 
 
         /* if empty, insert node at head */
         if (isCommandEmpty(*headPtr)) {
+            newPtr->index = 0;
             *headPtr = newPtr;
         } else {
+            newPtr->index = (*tailPtr)->index + 1;
             (*tailPtr)->nextCommand = newPtr;
         }
 
@@ -63,6 +72,8 @@ void emptyCommands(CommandNodePtr *headPtr, CommandNodePtr *tailPtr) {
         for (i = 0; i < temp->count; ++i) {
             free(temp->args[i]);
         }
+
+        free(temp);
 
     }
 }

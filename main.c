@@ -6,6 +6,7 @@
 #include <sys/wait.h>
 #include <stdbool.h>
 #include <dirent.h>
+#include <fcntl.h>
 #include "paths.h"
 #include "processes.h"
 #include "files.h"
@@ -35,12 +36,17 @@ int executePipes();
 
 int getNumberOfPipes(CommandNodePtr headCommand);
 
+bool isRedirect(char *symbol);
+
+int redirectOutput(char *redirect_type, char *filename);
+
+int executeSingleCommand(int background, char *args[]);
+
 int main(void)
 {
     char inputBuffer[MAX_LINE]; /* buffer to hold command entered */
     int background; /* equals 1 if a command is followed by '&' */
     char *args[MAX_LINE/2 + 1]; /* command line arguments */
-    pid_t child_pid;
     int number_of_args;
 
     /* store the files in the path in the linked-list */
@@ -57,49 +63,46 @@ int main(void)
         /* and store them in the queue */
         parseCommands(args, number_of_args);
 
-        executePipes();
-
-
-
-//        FileNodePtr file = findFile(files, args[0]);
-
-//        /** fork a child process using fork() */
-//        child_pid = fork();
-//
-//        if (child_pid == -1) {
-//            perror("Failed to fork");
-//            return EXIT_FAILURE;
-//        }
-//
-//        /* child process will invoke execv() */
-//        if (child_pid == 0) {
-//            printf("Hey! I'm the child process: %ld\n", (long)getpid());
-//
-//            /* if the process is running in the background, store it. */
-//            if (background) insertIntoProcesses(&headProcesses, &tailProcesses, getpid(), args[0]);
-//
-//            /* execute the given command */
-//            execv(file->path, &args[0]);
-//
-//
-//            perror("Command not found!");
-//        }
-//
-//        if (child_pid > 0) {
-//            if (background) {
-//                printf("Hey! I'm the parent (%ld) waiting for my child to finish!\n", (long) getpid());
-//
-//                __pid_t pid = wait(NULL);
-//                fprintf(stderr, "The PID that wait(NULL) returns: %ld\n", (long)pid);
-//
-//                printf("Hey! I'm the parent (%ld). My child (%ld) just finished executing!\n", (long)getpid(), (long)pid);
-//            } else {
-//                printf("Hey! I'm parent. I'm not waiting for my child.\n");
-//            }
-//        }
-
+        /* if a single command without pipe or redirection is given */
+        if (tailCommand->index == 0) {
+            executeSingleCommand(background, args);
+        } else {
+            executePipes();
+        }
 
     }
+}
+
+int executeSingleCommand(int background, char *args[]) {
+    pid_t child_pid;
+
+    /* fork a child process */
+    if ((child_pid = fork()) == -1) {
+        perror("Failed to fork");
+        return EXIT_FAILURE;
+    }
+
+    /* child process will invoke execv() */
+    if (child_pid == 0) {
+        /* if the process is running in the background, store it. */
+        if (background) insertIntoProcesses(&headProcesses, &tailProcesses, getpid(), args[0]);
+
+        FileNodePtr file = findFile(files, args[0]);
+
+        /* execute the given command */
+        execv(file->path, &args[0]);
+
+        perror("Command not found!");
+    }
+
+    /* parent will wait if ampersand does not exist in the command*/
+    if (child_pid > 0 || !background) {
+        wait(NULL);
+    }
+
+    // TODO: Remove completed background process from process list
+
+    return EXIT_SUCCESS;
 }
 
 int executePipes() {
@@ -108,6 +111,7 @@ int executePipes() {
 
     pid_t child_pid;
     int number_of_pipes = getNumberOfPipes(headCommand);
+
     int writeCounter = 1;
     int readCounter = 0;
 
@@ -136,6 +140,8 @@ int executePipes() {
         }
 
         if (child_pid == 0) {
+            fprintf(stderr, "I'm the child (%ld)\n", (long)getpid());
+
             command = headCommand;
 
             // command1 | command2 | command3 | command4 | command5 | command 6
@@ -144,10 +150,27 @@ int executePipes() {
                 // replace current stdout with write part of 0th pipe
                 if ( (dup2(pipes[writeCounter], STDOUT_FILENO)) < 0 )
                     perror("dup2 error!\n");
+
             } else if (j == number_of_pipes) {
                 // replace current stdin with input read of last pipe
                 if ( (dup2(pipes[readCounter], STDIN_FILENO)) < 0 )
                     perror("dup2 error\n");
+
+                // if there's redirection at the end
+                if (isRedirect(headCommand->next_symbol)) {
+                    pipes[writeCounter] =
+                            redirectOutput(headCommand->next_symbol, headCommand->nextCommand->args[0]);
+
+                    if (strcmp(headCommand->next_symbol, ">&") != 0) {
+                        if (dup2(pipes[writeCounter], STDOUT_FILENO) == -1)
+                            perror("dup2 error\n");
+                    } else {
+                        if (dup2(pipes[writeCounter], STDERR_FILENO) == -1)
+                            perror("dup2 error\n");
+                    }
+
+                }
+
             } else {
                 // replace current stdin with input read of middle pipe
                 if ( (dup2(pipes[readCounter], STDIN_FILENO)) < 0)
@@ -156,6 +179,7 @@ int executePipes() {
                 // replace current stdout with write end of middle pipe
                 if ( (dup2(pipes[writeCounter], STDOUT_FILENO)) < 0 )
                     perror("dup2 error\n");
+
             }
 
             /* close all pipes */
@@ -172,25 +196,21 @@ int executePipes() {
                 continue;
             }
 
-            int k;
-            char *args[command->count + 1];
-            for (k = 0; k <= command->count; k++) {
-                args[k] = command->args[k];
-            }
-
             /* execute the command */
-            execv(file->path, &args[0]);
+            execv(file->path, &command->args[0]);
             fprintf(stderr, "Failed to execute the command %s\n", file->name);
 
             return EXIT_FAILURE;
-        } else {
+        }
+        /* parent code */
+        else {
             /* update the counters in the parent code. */
             if (j == 0)
                 writeCounter += 2;
             else if (j == number_of_pipes);
             else {
                 readCounter += 2;
-                writeCounter =+ 2;
+                writeCounter += 2;
             }
 
             headCommand = headCommand->nextCommand;
@@ -202,11 +222,26 @@ int executePipes() {
     for (i = 0; i < (2 * number_of_pipes); i++)
         close(pipes[i]);
 
-    for (i = 0; i < 3; i++)
-        wait(&status);
+    /* the parent will wait for all of its children*/
+    for (i = 0; i <= number_of_pipes; i++){
+        fprintf(stderr, "I'm the parent (%ld) and waiting for my child to finish!\n", (long)getpid());
+        __pid_t child = wait(&status);
+        fprintf(stderr, "I'm the parent (%ld) and my child (%d) finished executing\n", (long)getpid(), child);
+    }
 
     return EXIT_SUCCESS;
 }
+
+int redirectOutput(char *redirect_type, char *filename) {
+
+    if (strcmp(redirect_type, ">") == 0)
+        return open(filename, CREATE_FLAGS_TRUNC, CREATE_MODE);
+    else if (strcmp(redirect_type, ">>") == 0 || strcmp(redirect_type, ">&") == 0)
+        return open(filename, CREATE_FLAGS_APPEND, CREATE_MODE);
+
+    return NULL;
+}
+
 
 int getNumberOfPipes(CommandNodePtr headCommand) {
     int count = 0;
@@ -235,6 +270,21 @@ void initializeFiles() {
 int isSymbol(char *symbol) {
     /* symbols available */
     char *symbols[] = {">", ">>", "<", ">&", "|"};
+    int length = sizeof (symbols) / sizeof (*symbols);
+    int i;
+
+    for (i = 0; i < length; i++) {
+        if (strcmp(symbols[i], symbol) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool isRedirect(char *symbol) {
+    /* symbols available */
+    char *symbols[] = {">", ">>", "<", ">&"};
     int length = sizeof (symbols) / sizeof (*symbols);
     int i;
 

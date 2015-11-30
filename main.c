@@ -17,7 +17,7 @@
 #define CREATE_MODE (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 // Open the file to write, if it does not exists create, if it does append to it.
 #define CREATE_FLAGS_APPEND (O_WRONLY | O_CREAT | O_APPEND)
-#define CREATE_FLAGS_TRUNC (O_WRONLY | O_CREAT | O_APPEND)
+#define CREATE_FLAGS_TRUNC (O_WRONLY | O_CREAT | O_TRUNC)
 
 int setup(char inputBuffer[], char *args[], int *background);
 
@@ -63,6 +63,9 @@ int main(void)
         /* and store them in the queue */
         parseCommands(args, number_of_args);
 
+        /* if no argument is provided, don't execute and show a new command prompt */
+        if (number_of_args == 0) continue;
+
         /* if a single command without pipe or redirection is given */
         if (tailCommand->index == 0) {
             executeSingleCommand(background, args);
@@ -106,14 +109,10 @@ int executeSingleCommand(int background, char *args[]) {
 }
 
 int executePipes() {
-    int i, j;
-    int status;
+    int i, j, commandCounter, pipeUsed;
 
     pid_t child_pid;
     int number_of_pipes = getNumberOfPipes(headCommand);
-
-    int writeCounter = 1;
-    int readCounter = 0;
 
     /* setup the pipes */
     int pipes[2 * number_of_pipes];
@@ -131,7 +130,7 @@ int executePipes() {
     // pipes[2] = read end of sort->wc pipe (read by wc)
     // pipes[3] = write end of sort->wc pipe (written by sort)
 
-    CommandNodePtr command;
+    commandCounter = 0;
     for (j = 0; j <= number_of_pipes; j++) {
 
         if ((child_pid = fork()) == -1) {
@@ -140,46 +139,32 @@ int executePipes() {
         }
 
         if (child_pid == 0) {
-            fprintf(stderr, "I'm the child (%ld)\n", (long)getpid());
-
-            command = headCommand;
-
             // command1 | command2 | command3 | command4 | command5 | command 6
             //        1   0      3   2      5   4      7   6      9    8
-            if (j == 0) {
-                // replace current stdout with write part of 0th pipe
-                if ( (dup2(pipes[writeCounter], STDOUT_FILENO)) < 0 )
-                    perror("dup2 error!\n");
 
-            } else if (j == number_of_pipes) {
-                // replace current stdin with input read of last pipe
-                if ( (dup2(pipes[readCounter], STDIN_FILENO)) < 0 )
+            /* if it's not the last command, replace current stdout with input read of last pipe */
+            if (commandCounter != number_of_pipes) {
+                if ((dup2(pipes[commandCounter * 2 + 1], STDOUT_FILENO)) < 0)
                     perror("dup2 error\n");
+            }
 
-                // if there's redirection at the end
-                if (isRedirect(headCommand->next_symbol)) {
-                    pipes[writeCounter] =
-                            redirectOutput(headCommand->next_symbol, headCommand->nextCommand->args[0]);
+            /* if it's not the first command, replace current stdin with write part of 0th pipe */
+            if (commandCounter != 0) {
+                if ( (dup2(pipes[(commandCounter-1) * 2], STDIN_FILENO)) < 0 )
+                    perror("dup2 error!\n");
+            }
+            // if there's redirection at the end
+            if (headCommand->next_symbol != NULL && isRedirect(headCommand->next_symbol)) {
+                pipes[commandCounter * 2 + 1] =
+                        redirectOutput(headCommand->next_symbol, headCommand->nextCommand->args[0]);
 
-                    if (strcmp(headCommand->next_symbol, ">&") != 0) {
-                        if (dup2(pipes[writeCounter], STDOUT_FILENO) == -1)
-                            perror("dup2 error\n");
-                    } else {
-                        if (dup2(pipes[writeCounter], STDERR_FILENO) == -1)
-                            perror("dup2 error\n");
-                    }
-
+                if (strcmp(headCommand->next_symbol, ">&") != 0) {
+                    if (dup2(pipes[commandCounter * 2 + 1], STDOUT_FILENO) == -1)
+                        perror("dup2 error\n");
+                } else {
+                    if (dup2(pipes[commandCounter * 2 + 1], STDERR_FILENO) == -1)
+                        perror("dup2 error\n");
                 }
-
-            } else {
-                // replace current stdin with input read of middle pipe
-                if ( (dup2(pipes[readCounter], STDIN_FILENO)) < 0)
-                    perror("dup2 error!\n");
-
-                // replace current stdout with write end of middle pipe
-                if ( (dup2(pipes[writeCounter], STDOUT_FILENO)) < 0 )
-                    perror("dup2 error\n");
-
             }
 
             /* close all pipes */
@@ -187,52 +172,39 @@ int executePipes() {
                 close(pipes[i]);
             }
 
-            FileNodePtr file = findFile(files, command->args[0]);
+            FileNodePtr file = findFile(files, headCommand->args[0]);
 
             /* check if the given command exists */
             if (file == NULL) {
-                printf("%s: command not found!\n", command->args[0]);
+                printf("%s: command not found!\n", headCommand->args[0]);
                 headCommand = headCommand->nextCommand;
                 continue;
             }
 
             /* execute the command */
-            execv(file->path, &command->args[0]);
+            execv(file->path, &headCommand->args[0]);
             fprintf(stderr, "Failed to execute the command %s\n", file->name);
 
             return EXIT_FAILURE;
         }
-        /* parent code */
-        else {
-            /* update the counters in the parent code. */
-            if (j == 0)
-                writeCounter += 2;
-            else if (j == number_of_pipes);
-            else {
-                readCounter += 2;
-                writeCounter += 2;
-            }
 
-            headCommand = headCommand->nextCommand;
-        }
+        headCommand = headCommand->nextCommand;
+        commandCounter++;
 
     }
 
-    /* close all pipes */
+    /* the parent closes all pipes */
     for (i = 0; i < (2 * number_of_pipes); i++)
         close(pipes[i]);
 
     /* the parent will wait for all of its children*/
-    for (i = 0; i <= number_of_pipes; i++){
-        fprintf(stderr, "I'm the parent (%ld) and waiting for my child to finish!\n", (long)getpid());
-        __pid_t child = wait(&status);
-        fprintf(stderr, "I'm the parent (%ld) and my child (%d) finished executing\n", (long)getpid(), child);
-    }
+    while (wait(NULL) > 0);
 
     return EXIT_SUCCESS;
 }
 
 int redirectOutput(char *redirect_type, char *filename) {
+    fprintf(stderr, "redirect_type: %s\nfilename: %s\n", redirect_type, filename);
 
     if (strcmp(redirect_type, ">") == 0)
         return open(filename, CREATE_FLAGS_TRUNC, CREATE_MODE);

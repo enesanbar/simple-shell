@@ -17,6 +17,8 @@
 #define CREATE_MODE (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 // Open the file to write, if it does not exists create, if it does append to it.
 #define CREATE_FLAGS_APPEND (O_WRONLY | O_CREAT | O_APPEND)
+
+// Open the file to write, if it does not exists create, if it does truncate it.
 #define CREATE_FLAGS_TRUNC (O_WRONLY | O_CREAT | O_TRUNC)
 
 int setup(char inputBuffer[], char *args[], int *background);
@@ -42,6 +44,10 @@ int redirectOutput(char *redirect_type, char *filename);
 
 int executeSingleCommand(int background, char *args[]);
 
+void remove_ampersand(char *args[], int background, int length);
+
+int isBackgroundProcess(char *args[], int number_of_arguments);
+
 int main(void)
 {
     char inputBuffer[MAX_LINE]; /* buffer to hold command entered */
@@ -58,6 +64,13 @@ int main(void)
 
         /* setup() calls exit() when Control-D is entered */
         number_of_args = setup(inputBuffer, args, &background);
+
+        /* set the location of ampersand if the process will run in background */
+        background = isBackgroundProcess(args, number_of_args);
+
+        if (background) {
+            remove_ampersand(args, background, number_of_args);
+        }
 
         /* split the commands by the pipe and redirection symbols */
         /* and store them in the queue */
@@ -99,7 +112,7 @@ int executeSingleCommand(int background, char *args[]) {
     }
 
     /* parent will wait if ampersand does not exist in the command*/
-    if (child_pid > 0 || !background) {
+    if (child_pid > 0 && !background) {
         wait(NULL);
     }
 
@@ -109,7 +122,7 @@ int executeSingleCommand(int background, char *args[]) {
 }
 
 int executePipes() {
-    int i, j, commandCounter, pipeUsed;
+    int i, j, commandCounter;
 
     pid_t child_pid;
     int number_of_pipes = getNumberOfPipes(headCommand);
@@ -190,7 +203,6 @@ int executePipes() {
 
         headCommand = headCommand->nextCommand;
         commandCounter++;
-
     }
 
     /* the parent closes all pipes */
@@ -204,8 +216,6 @@ int executePipes() {
 }
 
 int redirectOutput(char *redirect_type, char *filename) {
-    fprintf(stderr, "redirect_type: %s\nfilename: %s\n", redirect_type, filename);
-
     if (strcmp(redirect_type, ">") == 0)
         return open(filename, CREATE_FLAGS_TRUNC, CREATE_MODE);
     else if (strcmp(redirect_type, ">>") == 0 || strcmp(redirect_type, ">&") == 0)
@@ -218,7 +228,7 @@ int redirectOutput(char *redirect_type, char *filename) {
 int getNumberOfPipes(CommandNodePtr headCommand) {
     int count = 0;
 
-    /* loop through the command list*/
+    /* loop through the command list */
     while (headCommand != NULL) {
         /* if it is not the last argument and the symbol is a pipe, increment the counter */
         if (headCommand->next_symbol != NULL && strcmp(headCommand->next_symbol, "|") == 0)
@@ -269,6 +279,28 @@ bool isRedirect(char *symbol) {
     return false;
 }
 
+/* remove the ampersand symbol from the arguments array */
+void remove_ampersand(char *args[], int background, int length) {
+    int i = background;
+    for ( ; i < length; i++) {
+        args[i] = NULL;
+    }
+
+}
+
+/* return the index of ampersand symbol */
+int isBackgroundProcess(char *args[], int number_of_arguments) {
+    int i;
+    for (i = 0; i < number_of_arguments; i++) {
+        if (strcmp(args[i], "&") == 0) {
+            return i;
+        }
+    }
+
+    return 0;
+}
+
+
 /* split all command by the pipe and redirection symbols */
 void parseCommands(char *args[], int number_of_args) {
     int count;
@@ -280,11 +312,9 @@ void parseCommands(char *args[], int number_of_args) {
 
     /* loop through the argument array */
     for (i = 0; i < number_of_args; i++) {
-        /* ignore the remaining commands after ampersand */
-        if (strcmp(args[i], "&") == 0) return;
-
         /* split commands by the redirection or pipe symbol */
-        if (!isSymbol(args[i])) {
+
+        if (args[i] != NULL && !isSymbol(args[i])) {
             temp[count] = malloc(strlen(args[i]) + 1);
             strcpy(temp[count], args[i]);
             count++;

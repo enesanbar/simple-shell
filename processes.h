@@ -24,20 +24,24 @@ int isProcessesEmpty(ProcessNodePtr headPtr) {
 void insertIntoProcesses(ProcessNodePtr *headPtr, ProcessNodePtr *tailPtr,
                           long int process_id, char *name) {
     ProcessNodePtr newPtr; /* pointer to a new path */
+
+    /* allocate memory for the new node */
     newPtr = malloc( sizeof(ProcessNode) );
 
     if (newPtr != NULL) {
-        newPtr->process_id = process_id;
-        newPtr->name = name;
-        newPtr->is_running = RUNNING;
-        newPtr->is_displayed_once = false;
+        newPtr->process_id = process_id;    /* process id of the child */
+        newPtr->name = name;                /* name of the running program */
+        newPtr->is_running = RUNNING;       /* it's running */
+        newPtr->is_displayed_once = false;  /* it hasn't been displayed on the screen after termination */
         newPtr->nextProcess = NULL;
 
-        /* if empty, insert node at head */
+        /* if empty, insert the node at head */
         if (isProcessesEmpty(*headPtr)) {
-            newPtr->index = 0;
+            newPtr->index = 1;              /* first node has the 1st index*/
             *headPtr = newPtr;
-        } else {
+        }
+        /* otherwise, insert it to the tail */
+        else {
             newPtr->index = (*tailPtr)->index + 1;
             (*tailPtr)->nextProcess = newPtr;
         }

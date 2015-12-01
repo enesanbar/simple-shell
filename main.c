@@ -24,21 +24,11 @@
 int setup(char inputBuffer[], char *args[], int *background);
 
 /* Setup the path and command lists */
-void setupPath();
-void setupSystemFiles();
-
-/* determine if a given argument is either redirection or pipe symbol */
-int isSymbol(char *symbol);
+void initializeFiles();
 
 void parseCommands(char *args[], int i);
 
-void initializeFiles();
-
-int executePipes();
-
-int getNumberOfPipes(CommandNodePtr headCommand);
-
-bool isRedirect(char *symbol);
+int executeCommands(int background);
 
 int redirectOutput(char *redirect_type, char *filename);
 
@@ -47,6 +37,12 @@ int executeSingleCommand(int background, char *args[]);
 void remove_ampersand(char *args[], int background, int length);
 
 int isBackgroundProcess(char *args[], int number_of_arguments);
+
+bool isRedirect(char *symbol);
+
+bool isPipe(char *symbol);
+
+bool isFile(char *input);
 
 int main(void)
 {
@@ -62,33 +58,186 @@ int main(void)
         printf("$ ");
         fflush(stdout);
 
-        /* setup() calls exit() when Control-D is entered */
+        /* get the number of arguments */
         number_of_args = setup(inputBuffer, args, &background);
 
-        /* set the location of ampersand if the process will run in background */
-        background = isBackgroundProcess(args, number_of_args);
+        /* empty the command queue for the next use */
+        emptyCommands(&commandHead, &commandTail);
 
-        if (background) {
+        /* set the location of ampersand and remove it from the arguments array */
+        if ( (background = isBackgroundProcess(args, number_of_args)) > 0 ) {
             remove_ampersand(args, background, number_of_args);
         }
 
-        /* split the commands by the pipe and redirection symbols */
+        /* split the arguments by the pipe symbol */
         /* and store them in the queue */
         parseCommands(args, number_of_args);
 
         /* if no argument is provided, don't execute and show a new command prompt */
         if (number_of_args == 0) continue;
 
-        /* if a single command without pipe or redirection is given */
-        if (tailCommand->index == 0) {
-            executeSingleCommand(background, args);
-        } else {
-            executePipes();
-        }
-
+        /* start executing of the commands */
+        executeCommands(background);
     }
 }
 
+/* split all command by the pipe symbol */
+void parseCommands(char *args[], int number_of_args) {
+    int count;
+    int i, j;
+
+    count = 0;
+    char **temp = NULL;
+    temp = malloc(sizeof(char*) * number_of_args);
+
+    /* loop through the argument array */
+    for (i = 0; i <= number_of_args; i++) {
+        /* split commands by the pipe symbol */
+        if (args[i] != NULL && ! isPipe(args[i])) {
+            temp[count] = malloc(strlen(args[i]) + 1);
+            strcpy(temp[count], args[i]);
+            count++;
+        }
+        else {
+            insertIntoCommands(&commandHead, &commandTail, temp, count);
+            for (j = 0; j < count; j++) free(temp[j]);
+            count = 0;  // reset the counter
+        }
+    }
+
+    free(temp);
+}
+
+int executeCommands(int background) {
+    /* counters */
+    int i, j;
+
+    /* a temporary pointer to the head of the command queue */
+    CommandNodePtr commands = commandHead;
+
+    /* the current child PID */
+    pid_t child_pid;
+
+    /* the PID of the child that's finished execution */
+    pid_t finished_child;
+
+    /* command list is zero-based indexed.
+     * if there's 2 commands, there's 1 pipe */
+    int number_of_pipes = commandTail->index;
+
+    /* setup the pipes */
+    int pipes[2 * number_of_pipes];
+    for (i = 0; i < number_of_pipes; i++) {
+        if (pipe(pipes + i*2) == -1) {
+            perror("Failed to create the pipe");
+            return EXIT_FAILURE;
+        }
+    }
+
+    /* execute the commands one by one in a new process */
+    for (j = 0; j <= number_of_pipes; j++) {
+
+        /* fork a new child, exit on failure. */
+        if ((child_pid = fork()) == -1) {
+            perror("Failed to fork!");
+            exit(EXIT_FAILURE);
+        }
+
+        /* child code */
+        if (child_pid == 0) {
+            // command1 | command2 | command3 | command4 | command5 | command 6
+            //        1   0      3   2      5   4      7   6      9    8
+
+            /* if the process is running in the background, store it. */
+            if (background) insertIntoProcesses(&headProcesses, &tailProcesses, getpid(), commands->args[0]);
+
+
+            /* setup the input and output end of the pipes for both pipe and redirection operations */
+
+            /* if it's not the last command, replace current stdout with input read of last pipe */
+            if (commands->index != number_of_pipes) {
+                if ((dup2(pipes[commands->index * 2 + 1], STDOUT_FILENO)) < 0)
+                    perror("dup2 error\n");
+            }
+
+            /* if it's not the first command, replace current stdin with write part of 0th pipe */
+            if (commands->index != 0) {
+                if ( (dup2(pipes[(commands->index - 1) * 2], STDIN_FILENO)) < 0 )
+                    perror("dup2 error!\n");
+            }
+
+            // if there's input redirection in the current command
+            if (commands->input != NULL) {
+
+                /* safekeeping not to broke pipes if the input is not a file */
+                if ( isFile(commands->input) ) {
+                    pipes[(commands->index - 1) * 2] = open(commands->input, O_RDONLY);
+
+                    /* change the input end of the file descriptor to the file */
+                    if ( dup2(pipes[(commands->index - 1) * 2], STDIN_FILENO) == -1 ) {
+                        perror("dup2 error\n");
+                    }
+                }
+            }
+
+            // if there's output redirection in the current command
+            if (commands->output_type != NULL && isRedirect(commands->output_type)) {
+                int pipeUsed = commands->index * 2 + 1;
+                pipes[pipeUsed] = redirectOutput(commands->output_type, commands->output);
+
+                if (pipes[pipeUsed] != NULL) {
+                    if (strcmp(commands->output_type, ">&") != 0) {
+                        if (dup2(pipes[pipeUsed], STDOUT_FILENO) == -1)
+                            perror("dup2 error\n");
+                    } else {
+                        if (dup2(pipes[pipeUsed], STDERR_FILENO) == -1)
+                            perror("dup2 error\n");
+                    }
+                } else {
+                    perror("Error opening the file!\n");
+                }
+            }
+
+            /* close all pipes */
+            for (i = 0; i < (2 * number_of_pipes); i++) {
+                close(pipes[i]);
+            }
+
+            /* find the system file such as ls and sort */
+            FileNodePtr file = findFile(files, commands->args[0]);
+
+            /* check if the given command exists */
+            if (file == NULL) {
+                printf("%s: command not found!\n", commands->args[0]);
+                commands = commands->nextCommand;
+                continue;
+            }
+
+            /* execute the command: file node includes path as well as the filename */
+            execv(file->path, &commands->args[0]);
+            fprintf(stderr, "Failed to execute the command %s\n", file->name);
+
+            return EXIT_FAILURE;
+        }
+
+        /* advance to the next command */
+        commands = commands->nextCommand;
+    }
+
+    /* the parent closes all pipes */
+    for (i = 0; i < (2 * number_of_pipes); i++)
+        close(pipes[i]);
+
+
+    // TODO: Handle background processes here later
+
+    /* the parent will wait for all of its children */
+    while (wait(NULL) > 0);
+
+    return EXIT_SUCCESS;
+}
+
+/* unnecessary function */
 int executeSingleCommand(int background, char *args[]) {
     pid_t child_pid;
 
@@ -121,98 +270,13 @@ int executeSingleCommand(int background, char *args[]) {
     return EXIT_SUCCESS;
 }
 
-int executePipes() {
-    int i, j, commandCounter;
+bool isPipe(char *symbol) {
+    return strcmp(symbol, PIPE) == 0;
+}
 
-    pid_t child_pid;
-    int number_of_pipes = getNumberOfPipes(headCommand);
-
-    /* setup the pipes */
-    int pipes[2 * number_of_pipes];
-    for (i = 0; i < number_of_pipes; i++) {
-        if (pipe(pipes + i*2) == -1) {
-            perror("Failed to create the pipe");
-            return EXIT_FAILURE;
-        }
-    }
-
-    /* having executed this command: ls | sort | wc */
-    /* we'll have 4 fds */
-    // pipes[0] = read end of ls->sort pipe (read by sort)
-    // pipes[1] = write end of ls->sort pipe (written by ls)
-    // pipes[2] = read end of sort->wc pipe (read by wc)
-    // pipes[3] = write end of sort->wc pipe (written by sort)
-
-    commandCounter = 0;
-    for (j = 0; j <= number_of_pipes; j++) {
-
-        if ((child_pid = fork()) == -1) {
-            perror("Failed to fork!");
-            return EXIT_FAILURE;
-        }
-
-        if (child_pid == 0) {
-            // command1 | command2 | command3 | command4 | command5 | command 6
-            //        1   0      3   2      5   4      7   6      9    8
-
-            /* if it's not the last command, replace current stdout with input read of last pipe */
-            if (commandCounter != number_of_pipes) {
-                if ((dup2(pipes[commandCounter * 2 + 1], STDOUT_FILENO)) < 0)
-                    perror("dup2 error\n");
-            }
-
-            /* if it's not the first command, replace current stdin with write part of 0th pipe */
-            if (commandCounter != 0) {
-                if ( (dup2(pipes[(commandCounter-1) * 2], STDIN_FILENO)) < 0 )
-                    perror("dup2 error!\n");
-            }
-            // if there's redirection at the end
-            if (headCommand->next_symbol != NULL && isRedirect(headCommand->next_symbol)) {
-                pipes[commandCounter * 2 + 1] =
-                        redirectOutput(headCommand->next_symbol, headCommand->nextCommand->args[0]);
-
-                if (strcmp(headCommand->next_symbol, ">&") != 0) {
-                    if (dup2(pipes[commandCounter * 2 + 1], STDOUT_FILENO) == -1)
-                        perror("dup2 error\n");
-                } else {
-                    if (dup2(pipes[commandCounter * 2 + 1], STDERR_FILENO) == -1)
-                        perror("dup2 error\n");
-                }
-            }
-
-            /* close all pipes */
-            for (i = 0; i < (2 * number_of_pipes); i++) {
-                close(pipes[i]);
-            }
-
-            FileNodePtr file = findFile(files, headCommand->args[0]);
-
-            /* check if the given command exists */
-            if (file == NULL) {
-                printf("%s: command not found!\n", headCommand->args[0]);
-                headCommand = headCommand->nextCommand;
-                continue;
-            }
-
-            /* execute the command */
-            execv(file->path, &headCommand->args[0]);
-            fprintf(stderr, "Failed to execute the command %s\n", file->name);
-
-            return EXIT_FAILURE;
-        }
-
-        headCommand = headCommand->nextCommand;
-        commandCounter++;
-    }
-
-    /* the parent closes all pipes */
-    for (i = 0; i < (2 * number_of_pipes); i++)
-        close(pipes[i]);
-
-    /* the parent will wait for all of its children*/
-    while (wait(NULL) > 0);
-
-    return EXIT_SUCCESS;
+/* check if the input is a file */
+bool isFile(char *input) {
+    return (access(input, F_OK) != -1) ? true : false;
 }
 
 int redirectOutput(char *redirect_type, char *filename) {
@@ -222,70 +286,6 @@ int redirectOutput(char *redirect_type, char *filename) {
         return open(filename, CREATE_FLAGS_APPEND, CREATE_MODE);
 
     return NULL;
-}
-
-
-int getNumberOfPipes(CommandNodePtr headCommand) {
-    int count = 0;
-
-    /* loop through the command list */
-    while (headCommand != NULL) {
-        /* if it is not the last argument and the symbol is a pipe, increment the counter */
-        if (headCommand->next_symbol != NULL && strcmp(headCommand->next_symbol, "|") == 0)
-            count++;
-
-        headCommand = headCommand->nextCommand;
-    }
-
-    return count;
-}
-
-void initializeFiles() {
-    /* store the value of PATH environment variable in queue */
-    setupPath();
-
-    /* setup all commands available */
-    setupSystemFiles();
-}
-
-/* determine if a given argument is either redirection or pipe symbol */
-int isSymbol(char *symbol) {
-    /* symbols available */
-    char *symbols[] = {">", ">>", "<", ">&", "|"};
-    int length = sizeof (symbols) / sizeof (*symbols);
-    int i;
-
-    for (i = 0; i < length; i++) {
-        if (strcmp(symbols[i], symbol) == 0) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-bool isRedirect(char *symbol) {
-    /* symbols available */
-    char *symbols[] = {">", ">>", "<", ">&"};
-    int length = sizeof (symbols) / sizeof (*symbols);
-    int i;
-
-    for (i = 0; i < length; i++) {
-        if (strcmp(symbols[i], symbol) == 0) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-/* remove the ampersand symbol from the arguments array */
-void remove_ampersand(char *args[], int background, int length) {
-    int i = background;
-    for ( ; i < length; i++) {
-        args[i] = NULL;
-    }
-
 }
 
 /* return the index of ampersand symbol */
@@ -300,42 +300,14 @@ int isBackgroundProcess(char *args[], int number_of_arguments) {
     return 0;
 }
 
-
-/* split all command by the pipe and redirection symbols */
-void parseCommands(char *args[], int number_of_args) {
-    int count;
-    int i, j;
-
-    count = 0;
-    char **temp = NULL;
-    temp = malloc(sizeof(char*) * number_of_args);
-
-    /* loop through the argument array */
-    for (i = 0; i < number_of_args; i++) {
-        /* split commands by the redirection or pipe symbol */
-
-        if (args[i] != NULL && !isSymbol(args[i])) {
-            temp[count] = malloc(strlen(args[i]) + 1);
-            strcpy(temp[count], args[i]);
-            count++;
-
-            /* if it is the last argument, assign NULL to the symbol in the data structure */
-            if (i + 1 == number_of_args) {
-                insertIntoCommands(&headCommand, &tailCommand, temp, NULL, count);
-                for (j = 0; j < count; j++) free(temp[j]);
-                count = 0;  // reset the counter
-            }
-
-        }
-        else {
-            insertIntoCommands(&headCommand, &tailCommand, temp, args[i], count);
-            for (j = 0; j < count; j++) free(temp[j]);
-            count = 0;  // reset the counter
-        }
+/* remove the ampersand symbol from the arguments array */
+void remove_ampersand(char *args[], int background, int length) {
+    int i = background;
+    for ( ; i < length; i++) {
+        args[i] = NULL;
     }
-
-    free(temp);
 }
+
 
 /* setup the locations in the PATH variable */
 void setupPath() {
@@ -400,6 +372,14 @@ void setupSystemFiles() {
     }
 }
 
+void initializeFiles() {
+    /* store the value of PATH environment variable in queue */
+    setupPath();
+
+    /* setup all commands available */
+    setupSystemFiles();
+}
+
 /* read the next command line; separate it into distinct arguments. */
 int setup(char inputBuffer[], char *args[], int *background)
 {
@@ -457,19 +437,12 @@ int setup(char inputBuffer[], char *args[], int *background)
             default :             /* some other character */
                 if (start == -1)
                     start = i;
-                if (inputBuffer[i] == '&'){
-                    *background  = 1;
-                    inputBuffer[i-1] = '\0';
-                }
         } /* end of switch */
     }    /* end of for */
     args[count] = NULL; /* just in case the input line was > 80 */
 
-    /* empty the command list for the next use */
-    emptyCommands(&headCommand, &tailCommand);
-
-    for (i = 0; i <= count; i++)
-        printf("args %d = %s\n", i, args[i]);
+//    for (i = 0; i <= count; i++)
+//        printf("args %d = %s\n", i, args[i]);
 
     return count;
 }

@@ -21,7 +21,6 @@ int isCommandEmpty(CommandNodePtr headPtr) {
     return headPtr == NULL;
 }
 
-
 bool isRedirect(char *symbol) {
     /* symbols available */
     char *symbols[] = {">", ">>", "<", ">&"};
@@ -36,6 +35,7 @@ bool isRedirect(char *symbol) {
 
     return false;
 }
+
 
 void insertIntoCommands( CommandNodePtr *headPtr, CommandNodePtr *tailPtr, char **args, int count ) {
     int i, number_of_args = 0;
@@ -145,6 +145,8 @@ void printCommands(CommandNodePtr currentCommand) {
     else {
         while ( currentCommand != NULL ) {
             int i;
+            fprintf(stderr, "index: %d\n", currentCommand->index);
+
             for (i = 0; i <= currentCommand->number_of_args; i++)
                 fprintf(stderr, "args %d = %s\n", i, currentCommand->args[i]);
 

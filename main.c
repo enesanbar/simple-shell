@@ -8,9 +8,10 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include "paths.h"
-#include "processes.h"
 #include "files.h"
 #include "command.h"
+#include "processes.h"
+#include "builtins.h"
 
 #define MAX_LINE 80 /* 80 chars per line, per command, should be enough. */
 
@@ -24,15 +25,13 @@
 int setup(char inputBuffer[], char *args[], int *background);
 
 /* Setup the path and command lists */
-void initializeFiles();
+void initializeCommands();
 
 void parseCommands(char *args[], int i);
 
 int executeCommands(int background);
 
 int redirectOutput(char *redirect_type, char *filename);
-
-int executeSingleCommand(int background, char *args[]);
 
 void remove_ampersand(char *args[], int background, int length);
 
@@ -46,14 +45,15 @@ bool isFile(char *input);
 
 int main(void)
 {
+    BuiltinNodePtr builtin;
     char inputBuffer[MAX_LINE]; /* buffer to hold command entered */
     int background; /* equals 1 if a command is followed by '&' */
     char *args[MAX_LINE/2 + 1]; /* command line arguments */
     int number_of_args;
 
     /* store the files in the path in the linked-list */
-    initializeFiles();
-
+    initializeCommands();
+    printSystemFiles(files);
     while (1){
         printf("$ ");
         fflush(stdout);
@@ -61,23 +61,32 @@ int main(void)
         /* get the number of arguments */
         number_of_args = setup(inputBuffer, args, &background);
 
+        /* if no argument is provided, don't execute and show a new command prompt */
+        if (number_of_args == 0) continue;
+
         /* empty the command queue for the next use */
         emptyCommands(&commandHead, &commandTail);
 
         /* set the location of ampersand and remove it from the arguments array */
         if ( (background = isBackgroundProcess(args, number_of_args)) > 0 ) {
             remove_ampersand(args, background, number_of_args);
+            number_of_args--;   /* not interested in the count of & symbol */
         }
 
-        /* split the arguments by the pipe symbol */
-        /* and store them in the queue */
-        parseCommands(args, number_of_args);
+        /* if the command is a built-in command, execute its function */
+        if ((builtin = findBuiltIn(args[0])) != NULL) {
+            builtin->function(args);
+        }
+        /* if it's not a built-in function, it should be either a system function or not */
+        else {
+            /* split the arguments by the pipe symbol */
+            /* and store them in the queue */
+            parseCommands(args, number_of_args);
 
-        /* if no argument is provided, don't execute and show a new command prompt */
-        if (number_of_args == 0) continue;
+            /* start executing of the commands */
+            executeCommands(background);
+        }
 
-        /* start executing of the commands */
-        executeCommands(background);
     }
 }
 
@@ -115,6 +124,9 @@ int executeCommands(int background) {
     /* a temporary pointer to the head of the command queue */
     CommandNodePtr commands = commandHead;
 
+    /* find the system file such as ls and sort */
+    FileNodePtr file;
+
     /* the current child PID */
     pid_t child_pid;
 
@@ -137,22 +149,24 @@ int executeCommands(int background) {
     /* execute the commands one by one in a new process */
     for (j = 0; j <= number_of_pipes; j++) {
 
+        /* check if the given command exists, exit on failure */
+        if ( (file = findFile(files, commands->args[0])) == NULL ) {
+            printf("%s: command not found!\n", commands->args[0]);
+            return EXIT_FAILURE;
+        }
+
         /* fork a new child, exit on failure. */
-        if ((child_pid = fork()) == -1) {
+        if ( (child_pid = fork()) == -1 ) {
             perror("Failed to fork!");
-            exit(EXIT_FAILURE);
+            return EXIT_FAILURE;
         }
 
         /* child code */
         if (child_pid == 0) {
-            // command1 | command2 | command3 | command4 | command5 | command 6
-            //        1   0      3   2      5   4      7   6      9    8
 
-            /* if the process is running in the background, store it. */
-            if (background) insertIntoProcesses(&headProcesses, &tailProcesses, getpid(), commands->args[0]);
-
-
-            /* setup the input and output end of the pipes for both pipe and redirection operations */
+            /* setup the input and output end of the pipes for both pipe and redirection operations
+               command1 | command2 | command3 | command4 | command5 | command 6
+                      1   0      3   2      5   4      7   6      9   8                           */
 
             /* if it's not the last command, replace current stdout with input read of last pipe */
             if (commands->index != number_of_pipes) {
@@ -168,7 +182,6 @@ int executeCommands(int background) {
 
             // if there's input redirection in the current command
             if (commands->input != NULL) {
-
                 /* safekeeping not to broke pipes if the input is not a file */
                 if ( isFile(commands->input) ) {
                     pipes[(commands->index - 1) * 2] = open(commands->input, O_RDONLY);
@@ -203,21 +216,16 @@ int executeCommands(int background) {
                 close(pipes[i]);
             }
 
-            /* find the system file such as ls and sort */
-            FileNodePtr file = findFile(files, commands->args[0]);
-
-            /* check if the given command exists */
-            if (file == NULL) {
-                printf("%s: command not found!\n", commands->args[0]);
-                commands = commands->nextCommand;
-                continue;
-            }
-
             /* execute the command: file node includes path as well as the filename */
             execv(file->path, &commands->args[0]);
             fprintf(stderr, "Failed to execute the command %s\n", file->name);
 
             return EXIT_FAILURE;
+        }
+
+        /* if the process is running in the background, store it. */
+        if (background) {
+            insertIntoProcesses(&processHead, &processTail, getpid(), commands->args, commands->number_of_args);
         }
 
         /* advance to the next command */
@@ -228,48 +236,20 @@ int executeCommands(int background) {
     for (i = 0; i < (2 * number_of_pipes); i++)
         close(pipes[i]);
 
-
-    // TODO: Handle background processes here later
-
-    /* the parent will wait for all of its children */
-    while (wait(NULL) > 0);
-
-    return EXIT_SUCCESS;
-}
-
-/* unnecessary function */
-int executeSingleCommand(int background, char *args[]) {
-    pid_t child_pid;
-
-    /* fork a child process */
-    if ((child_pid = fork()) == -1) {
-        perror("Failed to fork");
-        return EXIT_FAILURE;
-    }
-
-    /* child process will invoke execv() */
-    if (child_pid == 0) {
-        /* if the process is running in the background, store it. */
-        if (background) insertIntoProcesses(&headProcesses, &tailProcesses, getpid(), args[0]);
-
-        FileNodePtr file = findFile(files, args[0]);
-
-        /* execute the given command */
-        execv(file->path, &args[0]);
-
-        perror("Command not found!");
-    }
-
-    /* parent will wait if ampersand does not exist in the command*/
-    if (child_pid > 0 && !background) {
+    /* the parent will wait for its children if & is provided */
+    if (commandTail->index == 0 && background == false) {
         wait(NULL);
     }
 
-    // TODO: Remove completed background process from process list
+    if (commandTail->index > 0 && number_of_pipes){
+        /* the parent will wait for all of its children */
+        while (wait(NULL) > 0);
+    }
 
     return EXIT_SUCCESS;
 }
 
+/* determine if the given symbol is a PIPE symbol */
 bool isPipe(char *symbol) {
     return strcmp(symbol, PIPE) == 0;
 }
@@ -297,7 +277,7 @@ int isBackgroundProcess(char *args[], int number_of_arguments) {
         }
     }
 
-    return 0;
+    return false;
 }
 
 /* remove the ampersand symbol from the arguments array */
@@ -372,12 +352,83 @@ void setupSystemFiles() {
     }
 }
 
-void initializeFiles() {
+void *ps_all(void *param) {
+    ProcessNodePtr process = processHead;
+    int i;
+
+    printf("Running: \n");
+    while (process != NULL) {
+        /* if the process is still running */
+        if (process->is_running == RUNNING) {
+
+            printf("\t[%d]\t", process->index);
+
+            for (i = 0; i < process->number_of_args; i++)
+                printf("%s ", process->args[i]);
+
+            printf("(PID=%ld)\n", process->process_id);
+        }
+
+        /* proceed to the nex process */
+        process = process->nextProcess;
+    }
+
+    process = processHead;
+    printf("Finished: \n");
+    while (process != NULL) {
+
+        /* if the process is finished and has never been displayed with the ps_all command */
+        if (process->is_running == FINISHED && process->is_displayed_once == false) {
+            printf("\t[%d]\t", process->index);
+
+            for (i = 0; i < process->number_of_args; i++)
+                printf("%s ", process->args[i]);
+
+            printf("\n");
+        }
+
+        /* finished process should be displayed once */
+        removeFromProcesses(&processHead, &processTail, process->process_id);
+
+        /* proceed to the nex process */
+        process = process->nextProcess;
+    }
+
+}
+
+void *kill_process(void *param) {
+    fprintf(stderr, "executing the kill function\n");
+}
+
+void *fg(void *param) {
+    fprintf(stderr, "executing the fg function\n");
+}
+
+void *exit_process(void *param) {
+    fprintf(stderr, "executing the exit function\n");
+}
+
+void *clear(void *param) {
+    printf("\033[H\033[J");
+}
+
+void setupBuiltIns() {
+    insertIntoBuiltins(&builtin_commands, "ps_all", &ps_all);
+    insertIntoBuiltins(&builtin_commands, "kill", &kill_process);
+    insertIntoBuiltins(&builtin_commands, "fg", &fg);
+    insertIntoBuiltins(&builtin_commands, "exit", &exit_process);
+    insertIntoBuiltins(&builtin_commands, "clear", &clear);
+}
+
+void initializeCommands() {
     /* store the value of PATH environment variable in queue */
     setupPath();
 
     /* setup all commands available */
     setupSystemFiles();
+
+    /* setup built-in commands */
+    setupBuiltIns();
 }
 
 /* read the next command line; separate it into distinct arguments. */

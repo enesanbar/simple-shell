@@ -5,7 +5,8 @@
 struct process_node {
     int index;
     long int process_id;
-    char *name;
+    char **args;
+    int number_of_args;
     int is_running;
     int is_displayed_once;
     struct process_node *nextProcess;
@@ -14,26 +15,33 @@ struct process_node {
 typedef struct process_node ProcessNode; /* synonym for struct process_node */
 typedef ProcessNode *ProcessNodePtr; /* synonym for ProcessNode* */
 
-ProcessNodePtr headProcesses = NULL; /* initialize headPtr */
-ProcessNodePtr tailProcesses = NULL; /* initialize tailPtr */
+ProcessNodePtr processHead = NULL; /* initialize headPtr */
+ProcessNodePtr processTail = NULL; /* initialize tailPtr */
 
 int isProcessesEmpty(ProcessNodePtr headPtr) {
     return headPtr == NULL;
 }
 
 void insertIntoProcesses(ProcessNodePtr *headPtr, ProcessNodePtr *tailPtr,
-                          long int process_id, char *name) {
+                          long int process_id, char **args, int number_of_args) {
     ProcessNodePtr newPtr; /* pointer to a new path */
+    int i;
 
     /* allocate memory for the new node */
     newPtr = malloc( sizeof(ProcessNode) );
 
     if (newPtr != NULL) {
         newPtr->process_id = process_id;    /* process id of the child */
-        newPtr->name = name;                /* name of the running program */
         newPtr->is_running = RUNNING;       /* it's running */
         newPtr->is_displayed_once = false;  /* it hasn't been displayed on the screen after termination */
         newPtr->nextProcess = NULL;
+
+        newPtr->number_of_args = number_of_args;
+        newPtr->args = malloc(sizeof(char*) * (number_of_args));
+        for (i = 0; i < number_of_args; i++) {
+            newPtr->args[i] = malloc(strlen(args[i]) + 1);
+            strcpy(newPtr->args[i], args[i]);
+        }
 
         /* if empty, insert the node at head */
         if (isProcessesEmpty(*headPtr)) {
@@ -85,4 +93,18 @@ long int removeFromProcesses(ProcessNodePtr *headPtr, ProcessNodePtr *tailPtr, l
     }
 
     return 0;
+}
+
+void printProcesses(ProcessNodePtr currentProcess) {
+    /* if queue is empty */
+    if (currentProcess == NULL) {
+        printf("Command list is empty");
+    }
+
+    while (currentProcess != NULL) {
+
+        fprintf(stderr, "[%d] %s\n", currentProcess->index, currentProcess->args[0]);
+
+        currentProcess = currentProcess->nextProcess;
+    }
 }

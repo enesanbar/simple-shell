@@ -55,7 +55,7 @@ FileNodePtr findFile(FileNodePtr currentFile, char *name) {
 
     else {
         while ( currentFile != NULL ) {
-            if (strcmp(currentFile->name, name) == 0)
+            if ((strcmp(currentFile->name, name) == 0) || strcmp(currentFile->path, name) == 0)
                 return currentFile;
 
             currentFile = currentFile->nextCommand;
@@ -76,6 +76,7 @@ void printSystemFiles(FileNodePtr currentFile) {
         while ( currentFile != NULL ) {
             printf("%s", currentFile->path);
             printf("\n");
+
             currentFile = currentFile->nextCommand;
         }
 

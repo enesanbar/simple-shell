@@ -22,7 +22,7 @@
 // Open the file to write, if it does not exists create, if it does truncate it.
 #define CREATE_FLAGS_TRUNC (O_WRONLY | O_CREAT | O_TRUNC)
 
-int setup(char inputBuffer[], char *args[], int *background);
+int setup(char inputBuffer[], char *args[]);
 
 /* Setup the path and command lists */
 void initializeCommands();
@@ -43,6 +43,8 @@ bool isPipe(char *symbol);
 
 bool isFile(char *input);
 
+void updateRunningProcesses();
+
 int main(void)
 {
     BuiltinNodePtr builtin;
@@ -53,13 +55,15 @@ int main(void)
 
     /* store the files in the path in the linked-list */
     initializeCommands();
-    printSystemFiles(files);
+
     while (1){
         printf("$ ");
         fflush(stdout);
 
         /* get the number of arguments */
-        number_of_args = setup(inputBuffer, args, &background);
+        number_of_args = setup(inputBuffer, args);
+
+        updateRunningProcesses();
 
         /* if no argument is provided, don't execute and show a new command prompt */
         if (number_of_args == 0) continue;
@@ -130,9 +134,6 @@ int executeCommands(int background) {
     /* the current child PID */
     pid_t child_pid;
 
-    /* the PID of the child that's finished execution */
-    pid_t finished_child;
-
     /* command list is zero-based indexed.
      * if there's 2 commands, there's 1 pipe */
     int number_of_pipes = commandTail->index;
@@ -163,7 +164,6 @@ int executeCommands(int background) {
 
         /* child code */
         if (child_pid == 0) {
-
             /* setup the input and output end of the pipes for both pipe and redirection operations
                command1 | command2 | command3 | command4 | command5 | command 6
                       1   0      3   2      5   4      7   6      9   8                           */
@@ -198,7 +198,7 @@ int executeCommands(int background) {
                 int pipeUsed = commands->index * 2 + 1;
                 pipes[pipeUsed] = redirectOutput(commands->output_type, commands->output);
 
-                if (pipes[pipeUsed] != NULL) {
+                if (pipes[pipeUsed] != -1) {
                     if (strcmp(commands->output_type, ">&") != 0) {
                         if (dup2(pipes[pipeUsed], STDOUT_FILENO) == -1)
                             perror("dup2 error\n");
@@ -225,7 +225,7 @@ int executeCommands(int background) {
 
         /* if the process is running in the background, store it. */
         if (background) {
-            insertIntoProcesses(&processHead, &processTail, getpid(), commands->args, commands->number_of_args);
+            insertIntoProcesses(&processHead, &processTail, child_pid, commands->args, commands->number_of_args);
         }
 
         /* advance to the next command */
@@ -249,6 +249,25 @@ int executeCommands(int background) {
     return EXIT_SUCCESS;
 }
 
+void updateRunningProcesses() {
+    ProcessNodePtr process = processHead;
+    int status;
+
+    while (process != NULL) {
+        if (process->is_running == RUNNING) {
+            if (waitpid(process->process_id, &status, WNOHANG) != 0) {
+                process->is_running = FINISHED;
+            }
+
+        }
+
+
+        process = process->nextProcess;
+    }
+
+
+}
+
 /* determine if the given symbol is a PIPE symbol */
 bool isPipe(char *symbol) {
     return strcmp(symbol, PIPE) == 0;
@@ -265,7 +284,7 @@ int redirectOutput(char *redirect_type, char *filename) {
     else if (strcmp(redirect_type, ">>") == 0 || strcmp(redirect_type, ">&") == 0)
         return open(filename, CREATE_FLAGS_APPEND, CREATE_MODE);
 
-    return NULL;
+    return -1;
 }
 
 /* return the index of ampersand symbol */
@@ -366,7 +385,7 @@ void *ps_all(void *param) {
             for (i = 0; i < process->number_of_args; i++)
                 printf("%s ", process->args[i]);
 
-            printf("(PID=%ld)\n", process->process_id);
+            printf("(PID=%ld)\n", (long)process->process_id);
         }
 
         /* proceed to the nex process */
@@ -379,16 +398,19 @@ void *ps_all(void *param) {
 
         /* if the process is finished and has never been displayed with the ps_all command */
         if (process->is_running == FINISHED && process->is_displayed_once == false) {
+
+            /* print the process index in square bracket */
             printf("\t[%d]\t", process->index);
 
+            /* print the arguments of the command */
             for (i = 0; i < process->number_of_args; i++)
                 printf("%s ", process->args[i]);
 
             printf("\n");
-        }
 
-        /* finished process should be displayed once */
-        removeFromProcesses(&processHead, &processTail, process->process_id);
+            /* finished process should be displayed once and removed from the data structure  */
+            removeFromProcesses(&processHead, &processTail, process->process_id);
+        }
 
         /* proceed to the nex process */
         process = process->nextProcess;
@@ -417,7 +439,7 @@ void setupBuiltIns() {
     insertIntoBuiltins(&builtin_commands, "kill", &kill_process);
     insertIntoBuiltins(&builtin_commands, "fg", &fg);
     insertIntoBuiltins(&builtin_commands, "exit", &exit_process);
-    insertIntoBuiltins(&builtin_commands, "clear", &clear);
+    insertIntoBuiltins(&builtin_commands, "c", &clear);
 }
 
 void initializeCommands() {
@@ -432,7 +454,7 @@ void initializeCommands() {
 }
 
 /* read the next command line; separate it into distinct arguments. */
-int setup(char inputBuffer[], char *args[], int *background)
+int setup(char inputBuffer[], char *args[])
 {
     int length; /* # of characters in the command line */
     int i;      /* loop index for accessing inputBuffer array */

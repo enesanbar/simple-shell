@@ -4,7 +4,7 @@
 /* struct to construct a list of processes. */
 struct process_node {
     int index;
-    long int process_id;
+    pid_t process_id;
     char **args;
     int number_of_args;
     int is_running;
@@ -66,7 +66,7 @@ long int removeFromProcesses(ProcessNodePtr *headPtr, ProcessNodePtr *tailPtr, l
     ProcessNodePtr tempPtr;
 
     /* if the process to terminate is the first one */
-    if (id == (*headPtr)->index) {
+    if (id == (*headPtr)->process_id) {
         tempPtr = *headPtr;
         *headPtr = (*headPtr)->nextProcess;
         free(tempPtr);
@@ -103,8 +103,10 @@ void printProcesses(ProcessNodePtr currentProcess) {
 
     while (currentProcess != NULL) {
 
-        fprintf(stderr, "[%d] %s\n", currentProcess->index, currentProcess->args[0]);
+        if (currentProcess->is_running) {
+            fprintf(stderr, "[%d] %s\n", currentProcess->index, currentProcess->args[0]);
 
+        }
         currentProcess = currentProcess->nextProcess;
     }
 }

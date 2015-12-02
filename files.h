@@ -74,7 +74,7 @@ void printSystemFiles(FileNodePtr currentFile) {
 
     else {
         while ( currentFile != NULL ) {
-            printf("%s", currentFile->path);
+            printf("%s -> %s", currentFile->name, currentFile->path);
             printf("\n");
 
             currentFile = currentFile->nextCommand;

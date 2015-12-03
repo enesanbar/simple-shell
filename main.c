@@ -495,10 +495,32 @@ int *fg(char *args[]) {
     return EXIT_SUCCESS;
 }
 
+/* built-in exit function to exit the terminal
+ * if there's no background process running */
 int *exit_process(char *args[]) {
-    fprintf(stderr, "executing the exit function\n");
+
+    /* a temporary variable to reference the head process node*/
+    ProcessNodePtr process = processHead;
+
+    /* loop through the processes list */
+    while (process != NULL) {
+
+        /* if there's at least one background process running */
+        /* return to the caller with failure */
+        if (process->is_running == RUNNING) {
+            printf("There're some background processes running\nPlease terminate them first!\n\n");
+            return (int *) EXIT_FAILURE;
+        }
+
+        /* advance to the next process */
+        process = process->nextProcess;
+    }
+
+    /* exit the program with success */
+    exit(EXIT_SUCCESS);
 }
 
+/* insert the built-in functions to the linked-list */
 void setupBuiltIns() {
     insertIntoBuiltins(&builtin_commands, "ps_all", &ps_all);
     insertIntoBuiltins(&builtin_commands, "kill", &kill_process);
@@ -506,6 +528,7 @@ void setupBuiltIns() {
     insertIntoBuiltins(&builtin_commands, "exit", &exit_process);
 }
 
+/* initialize files in the PATH */
 void initializeCommands() {
     /* store the value of PATH environment variable in queue */
     setupPath();

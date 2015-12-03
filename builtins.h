@@ -1,6 +1,6 @@
 struct builtin_node {
     char *name;
-    void *(*function) (void *);
+    int *(*function) (char *args[]);
     struct builtin_node *nextBuiltIn;
 };
 
@@ -9,7 +9,7 @@ typedef BuiltInNode *BuiltinNodePtr;
 
 BuiltinNodePtr builtin_commands = NULL;
 
-void insertIntoBuiltins(BuiltinNodePtr *sPtr, char *name, void *(*function) (void *)) {
+void insertIntoBuiltins(BuiltinNodePtr *sPtr, char *name, int *(*function) (char *args[])) {
     BuiltinNodePtr newPtr;
     BuiltinNodePtr previousPtr;
     BuiltinNodePtr currentPtr;

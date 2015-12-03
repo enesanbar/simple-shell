@@ -1,5 +1,7 @@
 #define RUNNING 1
 #define FINISHED 0
+#define PROCESS 1
+#define INDEX 0
 
 /* struct to construct a list of processes. */
 struct process_node {
@@ -8,7 +10,6 @@ struct process_node {
     char **args;
     int number_of_args;
     int is_running;
-    int is_displayed_once;
     struct process_node *nextProcess;
 };
 
@@ -33,7 +34,6 @@ void insertIntoProcesses(ProcessNodePtr *headPtr, ProcessNodePtr *tailPtr,
     if (newPtr != NULL) {
         newPtr->process_id = process_id;    /* process id of the child */
         newPtr->is_running = RUNNING;       /* it's running */
-        newPtr->is_displayed_once = false;  /* it hasn't been displayed on the screen after termination */
         newPtr->nextProcess = NULL;
 
         newPtr->number_of_args = number_of_args;
@@ -95,18 +95,25 @@ long int removeFromProcesses(ProcessNodePtr *headPtr, ProcessNodePtr *tailPtr, l
     return 0;
 }
 
-void printProcesses(ProcessNodePtr currentProcess) {
+ProcessNodePtr findProcess(ProcessNodePtr processes, int id, int id_type) {
     /* if queue is empty */
-    if (currentProcess == NULL) {
-        printf("Command list is empty");
+    if (processes == NULL) {
+        return NULL;
     }
 
-    while (currentProcess != NULL) {
-
-        if (currentProcess->is_running) {
-            fprintf(stderr, "[%d] %s\n", currentProcess->index, currentProcess->args[0]);
-
+    if (id_type == PROCESS){
+        while (processes != NULL) {
+            if (processes->process_id == id) return processes;
+            processes = processes->nextProcess;
         }
-        currentProcess = currentProcess->nextProcess;
     }
+
+    else if (id_type == INDEX) {
+        while (processes != NULL) {
+            if (processes->index == id) return processes;
+            processes = processes->nextProcess;
+        }
+    }
+
+    return NULL;
 }

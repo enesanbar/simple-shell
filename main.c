@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <regex.h>
 #include "paths.h"
 #include "files.h"
 #include "command.h"
@@ -258,9 +259,7 @@ void updateRunningProcesses() {
             if (waitpid(process->process_id, &status, WNOHANG) != 0) {
                 process->is_running = FINISHED;
             }
-
         }
-
 
         process = process->nextProcess;
     }
@@ -371,7 +370,7 @@ void setupSystemFiles() {
     }
 }
 
-void *ps_all(void *param) {
+int *ps_all(char *args[]) {
     ProcessNodePtr process = processHead;
     int i;
 
@@ -397,7 +396,7 @@ void *ps_all(void *param) {
     while (process != NULL) {
 
         /* if the process is finished and has never been displayed with the ps_all command */
-        if (process->is_running == FINISHED && process->is_displayed_once == false) {
+        if (process->is_running == FINISHED) {
 
             /* print the process index in square bracket */
             printf("\t[%d]\t", process->index);
@@ -418,20 +417,86 @@ void *ps_all(void *param) {
 
 }
 
-void *kill_process(void *param) {
-    fprintf(stderr, "executing the kill function\n");
+int *kill_process(char *args[]) {
+    int index;
+    int process_id;
+    regex_t regex_compiled;
+    ProcessNodePtr process;
+
+    // check if the argument is provided
+    if (args[1] == NULL) {
+        printf("Usage:\n\tkill %%index\n\tkill process_id\n");
+        return (int *) EXIT_FAILURE;
+    }
+
+    // compile the regular expression which looks for %number pattern
+    if (regcomp(&regex_compiled, "%[0-9]+", REG_EXTENDED)) {
+        printf("Could not compile regular expression.\n");
+        return (int *) EXIT_FAILURE;
+    }
+
+    /* if the argument is provided with the percent (%) symbol */
+    if ( ! regexec(&regex_compiled, args[1], 0, NULL, 0) ) {
+        index = atoi(strtok(args[1], "%"));
+
+        if ( (process = findProcess(processHead, index, INDEX)) == NULL ) {
+            printf("A process with an index of %d doesn't exists.\nYou may want to run 'ps_all' again!\n\n", index);
+            return (int *) EXIT_FAILURE;
+        }
+
+    } else {
+        process_id = atoi(args[1]);
+
+        if ( (process = findProcess(processHead, process_id, PROCESS)) == NULL ){
+            printf("A process with a process id of %d doesn't exists.\nYou may want to run 'ps_all' again!\n\n", process_id);
+            return (int *) EXIT_FAILURE;
+        }
+    }
+
+    process->is_running = FINISHED;
+    kill(process->process_id, SIGTERM);
+
+    return EXIT_SUCCESS;
 }
 
-void *fg(void *param) {
-    fprintf(stderr, "executing the fg function\n");
+int *fg(char *args[]) {
+    int index;
+    regex_t regex_compiled;
+    ProcessNodePtr process;
+
+    // check if the argument is provided
+    if (args[1] == NULL) {
+        printf("Usage:\n\tfg %%index\n");
+        return (int *) EXIT_FAILURE;
+    }
+
+    // compile the regular expression which looks for %number pattern
+    if (regcomp(&regex_compiled, "%[0-9]+", REG_EXTENDED)) {
+        printf("Could not compile regular expression.\n");
+        return (int *) EXIT_FAILURE;
+    }
+
+    /* if the argument is provided with the percent (%) symbol */
+    if ( ! regexec(&regex_compiled, args[1], 0, NULL, 0) ) {
+        index = atoi(strtok(args[1], "%"));
+
+        if ( (process = findProcess(processHead, index, INDEX)) == NULL ) {
+            printf("A process with an index of %d doesn't exists.\nYou may want to run 'ps_all' again!\n\n", index);
+            return (int *) EXIT_FAILURE;
+        }
+    } else {
+        printf("Usage:\n\tfg %%index\n");
+        return (int *) EXIT_FAILURE;
+    }
+
+    kill(process->process_id, SIGCONT);
+    removeFromProcesses(&processHead, &processTail, process->process_id);
+
+    return EXIT_SUCCESS;
 }
 
-void *exit_process(void *param) {
+int *exit_process(char *args[]) {
     fprintf(stderr, "executing the exit function\n");
-}
-
-void *clear(void *param) {
-    printf("\033[H\033[J");
 }
 
 void setupBuiltIns() {
@@ -439,7 +504,6 @@ void setupBuiltIns() {
     insertIntoBuiltins(&builtin_commands, "kill", &kill_process);
     insertIntoBuiltins(&builtin_commands, "fg", &fg);
     insertIntoBuiltins(&builtin_commands, "exit", &exit_process);
-    insertIntoBuiltins(&builtin_commands, "c", &clear);
 }
 
 void initializeCommands() {

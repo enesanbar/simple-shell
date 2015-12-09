@@ -32,19 +32,15 @@ void parseCommands(char *args[], int i);
 
 int executeCommands(int background);
 
-int redirectOutput(char *redirect_type, char *filename);
+int openFileToWrite(char *redirect_type, char *filename);
 
 void remove_ampersand(char *args[], int background, int length);
 
 int isBackgroundProcess(char *args[], int number_of_arguments);
 
-bool isRedirect(char *symbol);
-
-bool isPipe(char *symbol);
-
-bool isFile(char *input);
-
 void updateRunningProcesses();
+
+void redirectToFile(CommandNode *commands, int pipes[]);
 
 int main(void)
 {
@@ -78,21 +74,22 @@ int main(void)
             number_of_args--;   /* not interested in the count of & symbol */
         }
 
-        /* if the command is a built-in command, execute its function */
-        if ((builtin = findBuiltIn(args[0])) != NULL) {
-            builtin->function(args);
-        }
-        /* if it's not a built-in function, it should be either a system function or not */
-        else {
-            /* split the arguments by the pipe symbol */
-            /* and store them in the queue */
-            parseCommands(args, number_of_args);
+        /* split the arguments by the pipe symbol */
+        /* and store them in the queue */
+        parseCommands(args, number_of_args);
 
-            /* start executing of the commands */
-            executeCommands(background);
-        }
+        /* if the command is a built-in command, execute its function */
+        if ((builtin = findBuiltIn(args[0])) != NULL) builtin->function(args);
+
+        /* if it's not a built-in function, it should be either a system function or not */
+        else executeCommands(background);
 
     }
+}
+
+/* determine if the given symbol is a PIPE symbol */
+bool isPipe(char *symbol) {
+    return strcmp(symbol, PIPE) == 0;
 }
 
 /* split all command by the pipe symbol */
@@ -120,6 +117,11 @@ void parseCommands(char *args[], int number_of_args) {
     }
 
     free(temp);
+}
+
+/* check if the input is a file */
+bool isFile(char *input) {
+    return (access(input, F_OK) != -1) ? true : false;
 }
 
 int executeCommands(int background) {
@@ -191,25 +193,15 @@ int executeCommands(int background) {
                     if ( dup2(pipes[(commands->index - 1) * 2], STDIN_FILENO) == -1 ) {
                         perror("dup2 error\n");
                     }
+                } else {
+                    printf("%s: No such file or directory!\n", commands->input);
+                    exit(EXIT_FAILURE);
                 }
             }
 
             // if there's output redirection in the current command
-            if (commands->output_type != NULL && isRedirect(commands->output_type)) {
-                int pipeUsed = commands->index * 2 + 1;
-                pipes[pipeUsed] = redirectOutput(commands->output_type, commands->output);
-
-                if (pipes[pipeUsed] != -1) {
-                    if (strcmp(commands->output_type, ">&") != 0) {
-                        if (dup2(pipes[pipeUsed], STDOUT_FILENO) == -1)
-                            perror("dup2 error\n");
-                    } else {
-                        if (dup2(pipes[pipeUsed], STDERR_FILENO) == -1)
-                            perror("dup2 error\n");
-                    }
-                } else {
-                    perror("Error opening the file!\n");
-                }
+            if ( commands->output_type != NULL && isRedirect(commands->output_type)) {
+                redirectToFile(commands, pipes);
             }
 
             /* close all pipes */
@@ -217,7 +209,7 @@ int executeCommands(int background) {
                 close(pipes[i]);
             }
 
-            /* execute the command: file node includes path as well as the filename */
+            /* execute the command */
             execv(file->path, &commands->args[0]);
             fprintf(stderr, "Failed to execute the command %s\n", file->name);
 
@@ -239,12 +231,13 @@ int executeCommands(int background) {
 
     /* the parent will wait for its children if & is provided */
     if (commandTail->index == 0 && background == false) {
+
         wait(NULL);
     }
 
     if (commandTail->index > 0 && number_of_pipes){
         /* the parent will wait for all of its children */
-        while (wait(NULL) > 0);
+        while (wait(NULL) != child_pid);
     }
 
     return EXIT_SUCCESS;
@@ -264,26 +257,32 @@ void updateRunningProcesses() {
         process = process->nextProcess;
     }
 
-
 }
 
-/* determine if the given symbol is a PIPE symbol */
-bool isPipe(char *symbol) {
-    return strcmp(symbol, PIPE) == 0;
-}
-
-/* check if the input is a file */
-bool isFile(char *input) {
-    return (access(input, F_OK) != -1) ? true : false;
-}
-
-int redirectOutput(char *redirect_type, char *filename) {
+int openFileToWrite(char *redirect_type, char *filename) {
     if (strcmp(redirect_type, ">") == 0)
         return open(filename, CREATE_FLAGS_TRUNC, CREATE_MODE);
     else if (strcmp(redirect_type, ">>") == 0 || strcmp(redirect_type, ">&") == 0)
         return open(filename, CREATE_FLAGS_APPEND, CREATE_MODE);
 
     return -1;
+}
+
+void redirectToFile(CommandNode *commands, int pipes[]) {
+    int index = commands->index * 2 + 1;
+    pipes[index] = openFileToWrite(commands->output_type, commands->output);
+
+    if (pipes[index] != -1) {
+        if (strcmp(commands->output_type, ">&") != 0) {
+            if (dup2(pipes[index], STDOUT_FILENO) == -1)
+                perror("dup2 error\n");
+        } else {
+            if (dup2(pipes[index], STDERR_FILENO) == -1)
+                perror("dup2 error\n");
+        }
+    } else {
+        perror("Error opening the file!\n");
+    }
 }
 
 /* return the index of ampersand symbol */
@@ -371,34 +370,50 @@ void setupSystemFiles() {
 }
 
 int *ps_all(char *args[]) {
+    /* get a reference to the beginning of the process queue head */
     ProcessNodePtr process = processHead;
     int i;
+    int saved_stdout, fd[2];
 
+    // if there's output redirection in the current command
+    if ( commandHead->output != NULL && isRedirect(commandHead->output_type)) {
+        /* save the standard output to terminal to restore later */
+        saved_stdout = dup(STDOUT_FILENO);
+
+        /* redirect the standard output to the file named commandHead->output */
+        redirectToFile(commandHead, fd);
+    }
+
+    /* print the running processes */
     printf("Running: \n");
     while (process != NULL) {
         /* if the process is still running */
         if (process->is_running == RUNNING) {
 
+            /* print the process index in square brackets */
             printf("\t[%d]\t", process->index);
 
+            /* print the arguments of the command */
             for (i = 0; i < process->number_of_args; i++)
                 printf("%s ", process->args[i]);
 
             printf("(PID=%ld)\n", (long)process->process_id);
         }
 
-        /* proceed to the nex process */
+        /* proceed to the next process */
         process = process->nextProcess;
     }
 
+    /* get a reference to the beginning of the process queue head */
     process = processHead;
+
     printf("Finished: \n");
     while (process != NULL) {
 
         /* if the process is finished and has never been displayed with the ps_all command */
         if (process->is_running == FINISHED) {
 
-            /* print the process index in square bracket */
+            /* print the process index in square brackets */
             printf("\t[%d]\t", process->index);
 
             /* print the arguments of the command */
@@ -411,10 +426,15 @@ int *ps_all(char *args[]) {
             removeFromProcesses(&processHead, &processTail, process->process_id);
         }
 
-        /* proceed to the nex process */
+        /* proceed to the next process */
         process = process->nextProcess;
     }
 
+    // Restore the stdout to terminal at the end of the function
+    if ( commandHead->output != NULL && isRedirect(commandHead->output_type) ) {
+        dup2(saved_stdout, STDOUT_FILENO);
+        close(saved_stdout);
+    }
 }
 
 int *kill_process(char *args[]) {
@@ -453,7 +473,6 @@ int *kill_process(char *args[]) {
         }
     }
 
-    process->is_running = FINISHED;
     kill(process->process_id, SIGTERM);
 
     return EXIT_SUCCESS;
@@ -490,6 +509,7 @@ int *fg(char *args[]) {
     }
 
     kill(process->process_id, SIGCONT);
+    while (waitpid(process->process_id, NULL, 0) != process->process_id);
     removeFromProcesses(&processHead, &processTail, process->process_id);
 
     return EXIT_SUCCESS;

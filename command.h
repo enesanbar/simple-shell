@@ -160,6 +160,5 @@ void printCommands(CommandNodePtr currentCommand) {
             currentCommand = currentCommand->nextCommand;
         }
 
-
     }
 }

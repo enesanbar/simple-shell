@@ -1,6 +1,6 @@
 #define RUNNING 1
 #define FINISHED 0
-#define PROCESS 1
+#define PROCESS_ID 1
 #define INDEX 0
 
 /* struct to construct a list of processes. */
@@ -16,63 +16,90 @@ struct process_node {
 typedef struct process_node ProcessNode; /* synonym for struct process_node */
 typedef ProcessNode *ProcessNodePtr; /* synonym for ProcessNode* */
 
-ProcessNodePtr processHead = NULL; /* initialize headPtr */
-ProcessNodePtr processTail = NULL; /* initialize tailPtr */
+ProcessNodePtr processHead = NULL; /* initialize the head of the process queue */
+ProcessNodePtr processTail = NULL; /* initialize the tail of the process queue */
 
 int isProcessesEmpty(ProcessNodePtr headPtr) {
     return headPtr == NULL;
 }
 
+/* insert a new process to the process queue */
 void insertIntoProcesses(ProcessNodePtr *headPtr, ProcessNodePtr *tailPtr,
-                          long int process_id, char **args, int number_of_args) {
-    ProcessNodePtr newPtr; /* pointer to a new path */
+                         pid_t process_id, char **args, int number_of_args) {
+
+    /* pointer to a new process */
+    ProcessNodePtr newPtr;
+    /* loop counter */
     int i;
 
-    /* allocate memory for the new node */
+    /* allocate memory for the new process */
     newPtr = malloc( sizeof(ProcessNode) );
 
+    /* if the memory is available */
     if (newPtr != NULL) {
         newPtr->process_id = process_id;    /* process id of the child */
-        newPtr->is_running = RUNNING;       /* it's running */
+        newPtr->is_running = RUNNING;       /* it's currently running */
         newPtr->nextProcess = NULL;
 
+        /* store the arguments of the command that created this process */
         newPtr->number_of_args = number_of_args;
+
+        /* allocate enough memory location for the arguments */
         newPtr->args = malloc(sizeof(char*) * (number_of_args));
+
+        /* loop through the arguments */
         for (i = 0; i < number_of_args; i++) {
+            /* allocate memory for the current argument */
             newPtr->args[i] = malloc(strlen(args[i]) + 1);
+
+            /* copy the argument to the allocated memory area */
             strcpy(newPtr->args[i], args[i]);
         }
 
-        /* if empty, insert the node at head */
+        /* if empty, insert the process at head */
         if (isProcessesEmpty(*headPtr)) {
-            newPtr->index = 1;              /* first node has the 1st index*/
+            /* since it the first process in the list,
+             * its index will be 1*/
+            newPtr->index = 1;
             *headPtr = newPtr;
         }
+
         /* otherwise, insert it to the tail */
         else {
+            /* since it's not the first process in the list,
+             * last index will be incremented by one and assign to new process */
             newPtr->index = (*tailPtr)->index + 1;
             (*tailPtr)->nextProcess = newPtr;
         }
 
         *tailPtr = newPtr;
-    } else {
-        printf("%ld not inserted. No memory available.\n", process_id);
+    }
+
+    /* if there's not enough memory to create a new node */
+    else {
+        printf("%ld not inserted. No memory available.\n", (long) process_id);
     }
 }
 
 long int removeFromProcesses(ProcessNodePtr *headPtr, ProcessNodePtr *tailPtr, long int id) {
-    ProcessNodePtr previousPtr;
-    ProcessNodePtr currentPtr;
-    ProcessNodePtr tempPtr;
+    ProcessNodePtr previousPtr; /* pointer to the previous node */
+    ProcessNodePtr currentPtr;  /* pointer to the current node */
+    ProcessNodePtr tempPtr;     /* pointer to the node that will be deleted */
 
-    /* if the process to terminate is the first one */
+    /* if the process to remove is the first one */
     if (id == (*headPtr)->process_id) {
+        /* store the address of the first node in a temporary pointer */
         tempPtr = *headPtr;
+
+        /* assign the next node as the head of the queue */
         *headPtr = (*headPtr)->nextProcess;
+
+        /* free the node */
         free(tempPtr);
         return id;
     }
 
+    /* if the process to remove is not the first one, look for its location */
     else {
         previousPtr = *headPtr;
         currentPtr = (*headPtr)->nextProcess;
@@ -95,19 +122,22 @@ long int removeFromProcesses(ProcessNodePtr *headPtr, ProcessNodePtr *tailPtr, l
     return 0;
 }
 
+/* find the background process by either its index or process id */
 ProcessNodePtr findProcess(ProcessNodePtr processes, int id, int id_type) {
-    /* if queue is empty */
+    /* if queue is empty, return NULL */
     if (processes == NULL) {
         return NULL;
     }
 
-    if (id_type == PROCESS){
+    /* if the passed parameter is process id */
+    if ( id_type == PROCESS_ID ){
         while (processes != NULL) {
             if (processes->process_id == id) return processes;
             processes = processes->nextProcess;
         }
     }
 
+    /* if the passed parameter is index */
     else if (id_type == INDEX) {
         while (processes != NULL) {
             if (processes->index == id) return processes;
@@ -115,5 +145,6 @@ ProcessNodePtr findProcess(ProcessNodePtr processes, int id, int id_type) {
         }
     }
 
+    /* return NULL if process is not found */
     return NULL;
 }

@@ -14,33 +14,30 @@
 #include "processes.h"
 #include "builtins.h"
 
-#define MAX_LINE 80 /* 80 chars per line, per command, should be enough. */
+/* 80 chars per line, per command, should be enough. */
+#define MAX_LINE 80
 
 #define CREATE_MODE (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
-// Open the file to write, if it does not exists create, if it does append to it.
+
+// Open the file to write, if it does not exists, create; if it does, append to it.
 #define CREATE_FLAGS_APPEND (O_WRONLY | O_CREAT | O_APPEND)
 
-// Open the file to write, if it does not exists create, if it does truncate it.
+// Open the file to write, if it does not exist, create; if it does, truncate it.
 #define CREATE_FLAGS_TRUNC (O_WRONLY | O_CREAT | O_TRUNC)
+
+void initializeCommands();
 
 int setup(char inputBuffer[], char *args[]);
 
-/* Setup the path and command lists */
-void initializeCommands();
+void updateRunningProcesses();
+
+int isBackgroundProcess(char *args[], int number_of_arguments);
+
+void remove_ampersand(char *args[], int background, int length);
 
 void parseCommands(char *args[], int i);
 
 int executeCommands(int background);
-
-int openFileToWrite(char *redirect_type, char *filename);
-
-void remove_ampersand(char *args[], int background, int length);
-
-int isBackgroundProcess(char *args[], int number_of_arguments);
-
-void updateRunningProcesses();
-
-void redirectToFile(CommandNode *commands, int pipes[]);
 
 int main(void)
 {
@@ -50,7 +47,7 @@ int main(void)
     char *args[MAX_LINE/2 + 1]; /* command line arguments */
     int number_of_args;
 
-    /* store the files in the path in the linked-list */
+    /* store the files in the PATH in the linked-list */
     initializeCommands();
 
     while (1){
@@ -60,30 +57,32 @@ int main(void)
         /* get the number of arguments */
         number_of_args = setup(inputBuffer, args);
 
+        /* check if any background process is terminated */
         updateRunningProcesses();
 
         /* if no argument is provided, don't execute and show a new command prompt */
         if (number_of_args == 0) continue;
 
-        /* empty the command queue for the next use */
-        emptyCommands(&commandHead, &commandTail);
+        /* clear the command queue for the next use */
+        clearCommands(&commandHead, &commandTail);
 
-        /* set the location of ampersand and remove it from the arguments array */
+        /* remove the ampersand symbol and other arguments after it from the arguments array */
+        /* and store the location of the ampersand in the variable "background" */
         if ( (background = isBackgroundProcess(args, number_of_args)) > 0 ) {
+            /* if the user enter some other command, ignore it: gedit & ls | sort */
             remove_ampersand(args, background, number_of_args);
             number_of_args--;   /* not interested in the count of & symbol */
         }
 
-        /* split the arguments by the pipe symbol */
-        /* and store them in the queue */
+        /* split the arguments by the pipe symbol and store them in the queue */
         parseCommands(args, number_of_args);
 
         /* if the command is a built-in command, execute its function */
-        if ((builtin = findBuiltIn(args[0])) != NULL) builtin->function(args);
+        if ((builtin = findBuiltIn(args[0])) != NULL)
+            builtin->function(args);
 
         /* if it's not a built-in function, it should be either a system function or not */
         else executeCommands(background);
-
     }
 }
 
@@ -94,34 +93,89 @@ bool isPipe(char *symbol) {
 
 /* split all command by the pipe symbol */
 void parseCommands(char *args[], int number_of_args) {
-    int count;
-    int i, j;
+    int count;  /* index counter for the arguments */
+    int i, j;   /* loop counters */
 
     count = 0;
-    char **temp = NULL;
-    temp = malloc(sizeof(char*) * number_of_args);
+
+    /* allocate enough memory location to hold the arguments*/
+    char **temp = malloc(sizeof(char*) * number_of_args);
 
     /* loop through the argument array */
     for (i = 0; i <= number_of_args; i++) {
-        /* split commands by the pipe symbol */
+
+        /* while the pipe symbol is not seen, add everything to the temp array */
         if (args[i] != NULL && ! isPipe(args[i])) {
+
+            /* allocate a memory location for the current argument and C NULL terminator '\0' */
             temp[count] = malloc(strlen(args[i]) + 1);
-            strcpy(temp[count], args[i]);
-            count++;
+
+            /* copy argument to the current location in the temp array and increment the counter */
+            strcpy(temp[count++], args[i]);
         }
+
+        /* if the pipe symbol is encountered,
+         * store everything up to this point in the command queue */
         else {
+            /* store both the commands and its count for convenience */
             insertIntoCommands(&commandHead, &commandTail, temp, count);
+
+            /* free up the memory location */
             for (j = 0; j < count; j++) free(temp[j]);
-            count = 0;  // reset the counter
+
+            /* reset the counter */
+            count = 0;
         }
     }
 
+    /* free up the memory location for the holder array */
     free(temp);
 }
 
 /* check if the input is a file */
 bool isFile(char *input) {
     return (access(input, F_OK) != -1) ? true : false;
+}
+
+/* open the file to write and return its result to the caller */
+int openFileToWrite(char *redirect_type, char *filename) {
+    /* if the redirection symbol is the TRUNCATE mode */
+    if (strcmp(redirect_type, ">") == 0)
+        return open(filename, CREATE_FLAGS_TRUNC, CREATE_MODE);
+
+        /* if the redirection symbol is the APPEND mode */
+    else if (strcmp(redirect_type, ">>") == 0 || strcmp(redirect_type, ">&") == 0)
+        return open(filename, CREATE_FLAGS_APPEND, CREATE_MODE);
+
+    /* otherwise, return -1 to indicate that it's unsuccessful */
+    return -1;
+}
+
+/* point the stdout to the file */
+void redirectToFile(CommandNode *commands, int pipes[]) {
+    int index = commands->index * 2 + 1;
+    pipes[index] = openFileToWrite(commands->output_type, commands->output);
+
+    /* if the file is opened successfully */
+    if (pipes[index] != -1) {
+        /* if the symbol is > or >> (not intended for stderr)
+         * replace the stdout with the file opened */
+        if (strcmp(commands->output_type, ">&") != 0) {
+            if (dup2(pipes[index], STDOUT_FILENO) == -1)
+                perror("dup2 error\n");
+        }
+
+            /* if the symbol is >& to output the stderr to the file */
+        else {
+            if (dup2(pipes[index], STDERR_FILENO) == -1)
+                perror("dup2 error\n");
+        }
+    }
+
+        /* if the file is not opened successfully */
+    else {
+        perror("Error opening the file!\n");
+    }
 }
 
 int executeCommands(int background) {
@@ -153,7 +207,7 @@ int executeCommands(int background) {
     /* execute the commands one by one in a new process */
     for (j = 0; j <= number_of_pipes; j++) {
 
-        /* check if the given command exists, exit on failure */
+        /* check if the given command exists, exit if not found */
         if ( (file = findFile(files, commands->args[0])) == NULL ) {
             printf("%s: command not found!\n", commands->args[0]);
             return EXIT_FAILURE;
@@ -168,16 +222,29 @@ int executeCommands(int background) {
         /* child code */
         if (child_pid == 0) {
             /* setup the input and output end of the pipes for both pipe and redirection operations
+                i = 0      i = 1      i = 2      i = 3      i = 4      i = 5
                command1 | command2 | command3 | command4 | command5 | command 6
                       1   0      3   2      5   4      7   6      9   8                           */
 
-            /* if it's not the last command, replace current stdout with input read of last pipe */
+            /* the relationship between the index of a command and the pipe end that should be used: */
+            /* the output end of the pipes starts from 1;
+             * the input end of the pipes starts from 0
+             * and they are both incremented by 2 for new pipes
+             *
+             * So,  i * 2 + 1 gives the output end of the current command if it's not the last command and
+             *      (i - 1) * 2 gives the input end of the current command if it's not the first command
+             * */
+
+
+            /* if it's not the last command,
+             * replace current stdout with write end of the current pipe (1, 3, 5, ...) */
             if (commands->index != number_of_pipes) {
                 if ((dup2(pipes[commands->index * 2 + 1], STDOUT_FILENO)) < 0)
                     perror("dup2 error\n");
             }
 
-            /* if it's not the first command, replace current stdin with write part of 0th pipe */
+            /* if it's not the first command,
+             * replace current stdin with read end of the current pipe (0, 2, 4, ...) */
             if (commands->index != 0) {
                 if ( (dup2(pipes[(commands->index - 1) * 2], STDIN_FILENO)) < 0 )
                     perror("dup2 error!\n");
@@ -187,13 +254,19 @@ int executeCommands(int background) {
             if (commands->input != NULL) {
                 /* safekeeping not to broke pipes if the input is not a file */
                 if ( isFile(commands->input) ) {
+                    /* input redirection only works for the first command
+                     * command < input > output
+                     * comamnd1 < input | command2 | command3 > output.txt */
                     pipes[(commands->index - 1) * 2] = open(commands->input, O_RDONLY);
 
                     /* change the input end of the file descriptor to the file */
                     if ( dup2(pipes[(commands->index - 1) * 2], STDIN_FILENO) == -1 ) {
                         perror("dup2 error\n");
                     }
-                } else {
+                }
+
+                /* provided filename is not a file */
+                else {
                     printf("%s: No such file or directory!\n", commands->input);
                     exit(EXIT_FAILURE);
                 }
@@ -211,8 +284,9 @@ int executeCommands(int background) {
 
             /* execute the command */
             execv(file->path, &commands->args[0]);
-            fprintf(stderr, "Failed to execute the command %s\n", file->name);
 
+            /* if execv fails, the program continues to execute where it left of */
+            fprintf(stderr, "Failed to execute the command %s\n", file->name);
             return EXIT_FAILURE;
         }
 
@@ -225,69 +299,55 @@ int executeCommands(int background) {
         commands = commands->nextCommand;
     }
 
-    /* the parent closes all pipes */
+    /* at the end, the parent closes all pipes */
     for (i = 0; i < (2 * number_of_pipes); i++)
         close(pipes[i]);
 
-    /* the parent will wait for its children if & is provided */
+    /* the parent will wait for its child if & is provided */
     if (commandTail->index == 0 && background == false) {
-
         wait(NULL);
     }
 
+    /* the parent will wait for its children for pipe operation */
     if (commandTail->index > 0 && number_of_pipes){
-        /* the parent will wait for all of its children */
         while (wait(NULL) != child_pid);
     }
 
     return EXIT_SUCCESS;
 }
 
+/* this function checks whether any background process is terminated.
+ * if any process is terminated, their "is_running" flag will be equal to FINISHED.
+ * terminated background processes are not deleted as soon as they are terminated
+ * because they may be shown with the ps_all command later */
 void updateRunningProcesses() {
+    /* get a reference to the head of the process queue */
     ProcessNodePtr process = processHead;
-    int status;
 
+    /* loop through the process queue */
     while (process != NULL) {
+
+        /* check if the process that is RUNNING before is terminated now */
         if (process->is_running == RUNNING) {
-            if (waitpid(process->process_id, &status, WNOHANG) != 0) {
+
+            /* if the running process is termited, change its "is_running" flag */
+            if (waitpid(process->process_id, NULL, WNOHANG) != 0) {
                 process->is_running = FINISHED;
             }
+
         }
 
+        /* proceed to the next process */
         process = process->nextProcess;
-    }
-
-}
-
-int openFileToWrite(char *redirect_type, char *filename) {
-    if (strcmp(redirect_type, ">") == 0)
-        return open(filename, CREATE_FLAGS_TRUNC, CREATE_MODE);
-    else if (strcmp(redirect_type, ">>") == 0 || strcmp(redirect_type, ">&") == 0)
-        return open(filename, CREATE_FLAGS_APPEND, CREATE_MODE);
-
-    return -1;
-}
-
-void redirectToFile(CommandNode *commands, int pipes[]) {
-    int index = commands->index * 2 + 1;
-    pipes[index] = openFileToWrite(commands->output_type, commands->output);
-
-    if (pipes[index] != -1) {
-        if (strcmp(commands->output_type, ">&") != 0) {
-            if (dup2(pipes[index], STDOUT_FILENO) == -1)
-                perror("dup2 error\n");
-        } else {
-            if (dup2(pipes[index], STDERR_FILENO) == -1)
-                perror("dup2 error\n");
-        }
-    } else {
-        perror("Error opening the file!\n");
     }
 }
 
 /* return the index of ampersand symbol */
 int isBackgroundProcess(char *args[], int number_of_arguments) {
+    /* loop counter */
     int i;
+
+    /* loop through the argument array */
     for (i = 0; i < number_of_arguments; i++) {
         if (strcmp(args[i], "&") == 0) {
             return i;
@@ -297,16 +357,21 @@ int isBackgroundProcess(char *args[], int number_of_arguments) {
     return false;
 }
 
-/* remove the ampersand symbol from the arguments array */
+/* if the ampersand symbol is not the last argument,
+ * remove it (whether it's last or not) and the other arguments
+ * after the ampersand symbol from the arguments array */
 void remove_ampersand(char *args[], int background, int length) {
-    int i = background;
-    for ( ; i < length; i++) {
+    /* loop counter */
+    int i;
+
+    /* starting from the index of the ampersand symbol
+     * remove all arguments: e.g. emacs & ls -la | sort */
+    for (i = background; i < length; i++) {
         args[i] = NULL;
     }
 }
 
-
-/* setup the locations in the PATH variable */
+/* setup the files in the PATH variable */
 void setupPath() {
     // Get the PATH environment variable.
     char *paths = getenv("PATH");
@@ -369,6 +434,7 @@ void setupSystemFiles() {
     }
 }
 
+/* ps_all function prints the content of the process queue */
 int *ps_all(char *args[]) {
     /* get a reference to the beginning of the process queue head */
     ProcessNodePtr process = processHead;
@@ -435,8 +501,13 @@ int *ps_all(char *args[]) {
         dup2(saved_stdout, STDOUT_FILENO);
         close(saved_stdout);
     }
+
+    return EXIT_SUCCESS;
 }
 
+/* kill the process by its id or pid */
+/* regex is unnecessary here but
+ * it is used to familiarize ourselves with its usage */
 int *kill_process(char *args[]) {
     int index;
     int process_id;
@@ -459,25 +530,31 @@ int *kill_process(char *args[]) {
     if ( ! regexec(&regex_compiled, args[1], 0, NULL, 0) ) {
         index = atoi(strtok(args[1], "%"));
 
+        /* find the process by its index */
         if ( (process = findProcess(processHead, index, INDEX)) == NULL ) {
             printf("A process with an index of %d doesn't exists.\nYou may want to run 'ps_all' again!\n\n", index);
             return (int *) EXIT_FAILURE;
         }
 
-    } else {
+    }
+    /* if regex could't find match for the %number pattern, process id must be provided */
+    else {
         process_id = atoi(args[1]);
 
-        if ( (process = findProcess(processHead, process_id, PROCESS)) == NULL ){
+        /* find the process by its pid */
+        if ((process = findProcess(processHead, process_id, PROCESS_ID)) == NULL ){
             printf("A process with a process id of %d doesn't exists.\nYou may want to run 'ps_all' again!\n\n", process_id);
             return (int *) EXIT_FAILURE;
         }
     }
 
+    /* send a terminate signal to the process with a pid of process->process_id */
     kill(process->process_id, SIGTERM);
 
     return EXIT_SUCCESS;
 }
 
+/* fg command brings a background process to the foreground */
 int *fg(char *args[]) {
     int index;
     regex_t regex_compiled;
@@ -499,17 +576,23 @@ int *fg(char *args[]) {
     if ( ! regexec(&regex_compiled, args[1], 0, NULL, 0) ) {
         index = atoi(strtok(args[1], "%"));
 
+        /* find the process by its index */
         if ( (process = findProcess(processHead, index, INDEX)) == NULL ) {
             printf("A process with an index of %d doesn't exists.\nYou may want to run 'ps_all' again!\n\n", index);
             return (int *) EXIT_FAILURE;
         }
-    } else {
+    }
+    /* if regex engine could't find match for the %number pattern, invalid input is given */
+    else {
         printf("Usage:\n\tfg %%index\n");
         return (int *) EXIT_FAILURE;
     }
 
+    /* send a CONTINUE signal to the process and wait for its termination */
     kill(process->process_id, SIGCONT);
     while (waitpid(process->process_id, NULL, 0) != process->process_id);
+
+    /* remove the process from background processes */
     removeFromProcesses(&processHead, &processTail, process->process_id);
 
     return EXIT_SUCCESS;
@@ -540,7 +623,7 @@ int *exit_process(char *args[]) {
     exit(EXIT_SUCCESS);
 }
 
-/* insert the built-in functions to the linked-list */
+/* insert the built-in functions to the builtin_command linked-list */
 void setupBuiltIns() {
     insertIntoBuiltins(&builtin_commands, "ps_all", &ps_all);
     insertIntoBuiltins(&builtin_commands, "kill", &kill_process);
@@ -548,7 +631,7 @@ void setupBuiltIns() {
     insertIntoBuiltins(&builtin_commands, "exit", &exit_process);
 }
 
-/* initialize files in the PATH */
+/* initialize files in the PATH and built-in commands */
 void initializeCommands() {
     /* store the value of PATH environment variable in queue */
     setupPath();
@@ -620,9 +703,6 @@ int setup(char inputBuffer[], char *args[])
         } /* end of switch */
     }    /* end of for */
     args[count] = NULL; /* just in case the input line was > 80 */
-
-//    for (i = 0; i <= count; i++)
-//        printf("args %d = %s\n", i, args[i]);
 
     return count;
 }

@@ -9,74 +9,52 @@ typedef BuiltInNode *BuiltinNodePtr;
 
 BuiltinNodePtr builtin_commands = NULL;
 
-void insertIntoBuiltins(BuiltinNodePtr *sPtr, char *name, int *(*function) (char *args[])) {
+/* insert a new built-in command to the built-in command linked-list */
+void insertIntoBuiltins(BuiltinNodePtr *headPtr, char *name, int *(*function) (char *args[])) {
+    /* pointer to a new node */
     BuiltinNodePtr newPtr;
-    BuiltinNodePtr previousPtr;
-    BuiltinNodePtr currentPtr;
 
+    /* allocate a memory location for a new node */
     newPtr = malloc( sizeof(BuiltInNode) );
 
+    /* if the memory is available */
     if ( newPtr != NULL ) {
+        /* allocate a memory location for the command name */
         newPtr->name = malloc(strlen(name) + 1);
+
+        /* copy the command name to the allocated memory area */
         strcpy(newPtr->name, name);
 
+        /* assign the address of the function of the command */
         newPtr->function = function;
-        newPtr->nextBuiltIn = NULL;
 
-        previousPtr = NULL;
-        currentPtr = *sPtr;
+        /* insert the commands on top of each other (STACK) */
+        newPtr->nextBuiltIn = *headPtr;
+        *headPtr = newPtr;
+    }
 
-        /* loop to find the correct location to insert the command alphabetically */
-        while ( currentPtr != NULL && (strcmp(name, currentPtr->name)) > 0) {
-            previousPtr = currentPtr;
-            currentPtr = currentPtr->nextBuiltIn;
-        }
-
-        /* insert the command at the beginning if it's initially empty */
-        if (previousPtr == NULL) {
-            newPtr->nextBuiltIn = *sPtr;
-            *sPtr = newPtr;
-        }
-
-        else {
-            previousPtr->nextBuiltIn = newPtr;
-            newPtr->nextBuiltIn = currentPtr;
-        }
-    } else {
+    /* if there's not enough memory to create a new node */
+    else {
         fprintf(stderr, "The command %s not inserted. No memory available!\n", name);
     }
 }
 
+/* find the built-in command by its name */
 BuiltinNodePtr findBuiltIn(char *name) {
+    /* get a reference to the head of the built-in command linked-list */
     BuiltinNodePtr builtin = builtin_commands;
 
+    /* loop through the built-in command linked-list */
     while (builtin != NULL) {
 
-        if (strcmp(builtin->name, name) == 0) {
+        /* when found, return it */
+        if (strcmp(builtin->name, name) == 0)
             return builtin;
-        }
 
+        /* proceed to the next built-in node*/
         builtin = builtin->nextBuiltIn;
     }
 
+    /* if not found, return NULL */
     return NULL;
-}
-
-void printBuiltins(BuiltinNodePtr builtins) {
-    /* if there's no built-in function */
-    if (builtins == NULL) {
-        printf("Command list is empty");
-    }
-
-    else {
-        fprintf(stderr, "Here's the built-in commands supported:\n");
-
-        while ( builtins != NULL ) {
-            //builtins->function("");
-            fprintf(stderr, "%s\n", builtins->name);
-
-            builtins = builtins->nextBuiltIn;
-        }
-
-    }
 }

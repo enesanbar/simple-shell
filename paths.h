@@ -7,47 +7,37 @@ struct path_node {
 typedef struct path_node PathNode; /* synonym for struct path_node */
 typedef PathNode *PathNodePtr; /* synonym for PathNode* */
 
-PathNodePtr headPaths = NULL; /* initialize headPtr */
-PathNodePtr tailPaths = NULL; /* initialize tailPtr */
+PathNodePtr headPaths = NULL; /* initialize the head of the path queue */
+PathNodePtr tailPaths = NULL; /* initialize the tail of the path queue */
 
-int isEmpty(PathNodePtr headPtr) {
-    return headPtr == NULL;
-}
+/* insert a new path to the path queue */
+void insertIntoPath( PathNodePtr *headPtr, PathNodePtr *tailPtr, char *path ) {
+    /* pointer to a new path */
+    PathNodePtr newPtr;
 
-void insertIntoPath( PathNodePtr *headPtr, PathNodePtr *tailPtr, char *value ) {
-    PathNodePtr newPtr; /* pointer to a new path */
+    /* allocate memory for the new node */
     newPtr = malloc( sizeof(PathNode) );
 
+    /* if the memory is available */
     if (newPtr != NULL) {
-        newPtr->path = value;
+        /* assign the path to struct */
+        newPtr->path = path;
         newPtr->nextPath = NULL;
 
-        /* if empty, insert node at head */
-        if (isEmpty(*headPtr)) {
+        /* if empty, insert the new node at the head */
+        if (*headPtr == NULL) {
             *headPtr = newPtr;
-        } else {
+        }
+        /* otherwise, insert it at the tail */
+        else {
             (*tailPtr)->nextPath = newPtr;
         }
 
         *tailPtr = newPtr;
-    } else {
-        printf( "%s not inserted. No memory available.\n", value );
     }
-
-}
-
-void printPaths(PathNodePtr currentPath) {
-    /* if queue is empty */
-    if (currentPath == NULL) {
-        printf("Path list is empty");
-    }
-
+    /* if there's not enough memory available */
     else {
-        while ( currentPath != NULL ) {
-            printf("%s", currentPath->path);
-            printf("\n");
-            currentPath = currentPath->nextPath;
-        }
-
+        printf( "%s not inserted. No memory available.\n", path );
     }
+
 }

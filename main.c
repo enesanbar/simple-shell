@@ -35,7 +35,7 @@ int isBackgroundProcess(char *args[], int number_of_arguments);
 
 void remove_ampersand(char *args[], int background, int length);
 
-void parseCommands(char *args[], int i);
+void parseArguments(char *args[], int i);
 
 int executeCommands(int background);
 
@@ -75,7 +75,7 @@ int main(void)
         }
 
         /* split the arguments by the pipe symbol and store them in the queue */
-        parseCommands(args, number_of_args);
+        parseArguments(args, number_of_args);
 
         /* if the command is a built-in command, execute its function */
         if ((builtin = findBuiltIn(args[0])) != NULL)
@@ -92,7 +92,7 @@ bool isPipe(char *symbol) {
 }
 
 /* split all command by the pipe symbol */
-void parseCommands(char *args[], int number_of_args) {
+void parseArguments(char *args[], int number_of_args) {
     int count;  /* index counter for the arguments */
     int i, j;   /* loop counters */
 
@@ -292,7 +292,8 @@ int executeCommands(int background) {
 
         /* if the process is running in the background, store it. */
         if (background) {
-            insertIntoProcesses(&processHead, &processTail, child_pid, commands->args, commands->number_of_args);
+            insertIntoProcesses(&processHead, &processTail, child_pid, 
+            						commands->args, commands->number_of_args);
         }
 
         /* advance to the next command */
@@ -330,7 +331,7 @@ void updateRunningProcesses() {
         /* check if the process that is RUNNING before is terminated now */
         if (process->is_running == RUNNING) {
 
-            /* if the running process is termited, change its "is_running" flag */
+            /* if the running process is terminated, change its "is_running" flag */
             if (waitpid(process->process_id, NULL, WNOHANG) != 0) {
                 process->is_running = FINISHED;
             }
@@ -443,7 +444,7 @@ int *ps_all(char *args[]) {
 
     // if there's output redirection in the current command
     if ( commandHead->output != NULL && isRedirect(commandHead->output_type)) {
-        /* save the standard output to terminal to restore later */
+        /* save the standard output to terminal to restore it after redirection */
         saved_stdout = dup(STDOUT_FILENO);
 
         /* redirect the standard output to the file named commandHead->output */
@@ -600,7 +601,7 @@ int *fg(char *args[]) {
 
 /* built-in exit function to exit the terminal
  * if there's no background process running */
-int *exit_process(char *args[]) {
+int *exit_terminal(char *args[]) {
 
     /* a temporary variable to reference the head process node*/
     ProcessNodePtr process = processHead;
@@ -628,7 +629,7 @@ void setupBuiltIns() {
     insertIntoBuiltins(&builtin_commands, "ps_all", &ps_all);
     insertIntoBuiltins(&builtin_commands, "kill", &kill_process);
     insertIntoBuiltins(&builtin_commands, "fg", &fg);
-    insertIntoBuiltins(&builtin_commands, "exit", &exit_process);
+    insertIntoBuiltins(&builtin_commands, "exit", &exit_terminal);
 }
 
 /* initialize files in the PATH and built-in commands */

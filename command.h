@@ -1,6 +1,6 @@
 #define PIPE "|"
 
-/* Struct to construct a list of paths. */
+/* Struct to construct a list of commands. */
 struct command_node {
     int index;
     char **args;

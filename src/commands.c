@@ -1,21 +1,7 @@
-#define PIPE "|"
-
-/* Struct to construct a list of commands. */
-struct command_node {
-    int index;
-    char **args;
-    int number_of_args;
-    char *input;
-    char *output;
-    char *output_type;
-    struct command_node *nextCommand;
-};
-
-typedef struct command_node CommandNode; /* synonym for struct command_node */
-typedef CommandNode *CommandNodePtr; /* synonym for CommandNode* */
-
-CommandNodePtr commandHead = NULL; /* initialize the head of the command queue */
-CommandNodePtr commandTail = NULL; /* initialize the tail of the command queue */
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include "../include/commands.h"
 
 int isCommandEmpty(CommandNodePtr headPtr) {
     return headPtr == NULL;

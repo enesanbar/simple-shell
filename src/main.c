@@ -8,11 +8,11 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <regex.h>
-#include "paths.h"
-#include "files.h"
-#include "command.h"
-#include "processes.h"
-#include "builtins.h"
+#include "../include/paths.h"
+#include "../include/files.h"
+#include "../include/commands.h"
+#include "../include/processes.h"
+#include "../include/builtins.h"
 
 /* 80 chars per line, per command, should be enough. */
 #define MAX_LINE 80
@@ -38,6 +38,19 @@ void remove_ampersand(char *args[], int background, int length);
 void parseArguments(char *args[], int i);
 
 int executeCommands(int background);
+
+PathNodePtr headPaths = NULL; /* initialize the head of the path queue */
+PathNodePtr tailPaths = NULL; /* initialize the tail of the path queue */
+
+FileNodePtr files = NULL; /* initialize the file linked-list */
+
+BuiltinNodePtr builtin_commands = NULL;
+
+CommandNodePtr commandHead = NULL; /* initialize the head of the command queue */
+CommandNodePtr commandTail = NULL; /* initialize the tail of the command queue */
+
+ProcessNodePtr processHead = NULL; /* initialize the head of the process queue */
+ProcessNodePtr processTail = NULL; /* initialize the tail of the process queue */
 
 int main(void)
 {
@@ -78,7 +91,7 @@ int main(void)
         parseArguments(args, number_of_args);
 
         /* if the command is a built-in command, execute its function */
-        if ((builtin = findBuiltIn(args[0])) != NULL)
+        if ((builtin = findBuiltIn(builtin_commands, args[0])) != NULL)
             builtin->function(args);
 
         /* if it's not a built-in function, it should be either a system function or not */

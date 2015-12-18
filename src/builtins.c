@@ -1,13 +1,7 @@
-struct builtin_node {
-    char *name;
-    int *(*function) (char *args[]);
-    struct builtin_node *nextBuiltIn;
-};
-
-typedef struct builtin_node BuiltInNode;
-typedef BuiltInNode *BuiltinNodePtr;
-
-BuiltinNodePtr builtin_commands = NULL;
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "../include/builtins.h"
 
 /* insert a new built-in command to the built-in command linked-list */
 void insertIntoBuiltins(BuiltinNodePtr *headPtr, char *name, int *(*function) (char *args[])) {
@@ -40,9 +34,9 @@ void insertIntoBuiltins(BuiltinNodePtr *headPtr, char *name, int *(*function) (c
 }
 
 /* find the built-in command by its name */
-BuiltinNodePtr findBuiltIn(char *name) {
+BuiltinNodePtr findBuiltIn(BuiltinNodePtr builtinHead, char *name) {
     /* get a reference to the head of the built-in command linked-list */
-    BuiltinNodePtr builtin = builtin_commands;
+    BuiltinNodePtr builtin = builtinHead;
 
     /* loop through the built-in command linked-list */
     while (builtin != NULL) {

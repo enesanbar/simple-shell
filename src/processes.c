@@ -1,23 +1,8 @@
-#define RUNNING 1
-#define FINISHED 0
-#define PROCESS_ID 1
-#define INDEX 0
-
-/* struct to construct a list of processes. */
-struct process_node {
-    int index;
-    pid_t process_id;
-    char **args;
-    int number_of_args;
-    int is_running;
-    struct process_node *nextProcess;
-};
-
-typedef struct process_node ProcessNode; /* synonym for struct process_node */
-typedef ProcessNode *ProcessNodePtr; /* synonym for ProcessNode* */
-
-ProcessNodePtr processHead = NULL; /* initialize the head of the process queue */
-ProcessNodePtr processTail = NULL; /* initialize the tail of the process queue */
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
+#include "../include/processes.h"
 
 int isProcessesEmpty(ProcessNodePtr headPtr) {
     return headPtr == NULL;

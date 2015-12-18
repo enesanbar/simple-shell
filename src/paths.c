@@ -1,14 +1,7 @@
-/* Struct to construct a list of paths. */
-struct path_node {
-    char *path;
-    struct path_node *nextPath;
-};
+#include <stdio.h>
+#include <stdlib.h>
+#include "../include/paths.h"
 
-typedef struct path_node PathNode; /* synonym for struct path_node */
-typedef PathNode *PathNodePtr; /* synonym for PathNode* */
-
-PathNodePtr headPaths = NULL; /* initialize the head of the path queue */
-PathNodePtr tailPaths = NULL; /* initialize the tail of the path queue */
 
 /* insert a new path to the path queue */
 void insertIntoPath( PathNodePtr *headPtr, PathNodePtr *tailPtr, char *path ) {
